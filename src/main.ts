@@ -4,14 +4,14 @@ document.body.style.margin = '0';
 document.body.style.overflow = 'hidden';
 document.body.style.background = '#8fc5e8';
 
-const WORLD_SIZE = 420;
+const WORLD_SIZE = 2400;
 const CITY_EXTENT = 180;
 const BOUNDARY = WORLD_SIZE / 2 - 10;
 const COIN_COUNT = 28;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8fc5e8);
-scene.fog = new THREE.Fog(0x8fc5e8, 90, 360);
+scene.fog = new THREE.Fog(0x8fc5e8, 120, 950);
 
 const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 700);
 camera.position.set(0, 10, 18);
@@ -188,7 +188,7 @@ const yawResponse = 0.14;
 const climbPitchRate = 0.006;
 const divePitchRate = 0.014;
 const pitchReturn = 0.985;
-const startPosition = new THREE.Vector3(0, 18, 155);
+const startPosition = new THREE.Vector3(0, 1000, 155);
 
 let yawVelocity = 0;
 
@@ -200,6 +200,9 @@ function resetRun() {
   heading = 0;
   pitch = 0;
   yawVelocity = 0;
+  cameraHeading = 0;
+  desiredCamera.copy(startPosition);
+  smoothedLookTarget.copy(startPosition);
   score = 0;
   distance = 0;
   crashed = false;
@@ -233,6 +236,8 @@ function crash() {
 const tempForward = new THREE.Vector3();
 const desiredCamera = new THREE.Vector3();
 const lookTarget = new THREE.Vector3();
+const smoothedLookTarget = new THREE.Vector3();
+let cameraHeading = 0;
 
 let previousTime = performance.now();
 
@@ -342,19 +347,29 @@ function animate(now = performance.now()) {
   const targetRoll = THREE.MathUtils.clamp(-yawVelocity * 7.5, -0.38, 0.38);
   glider.rotation.z += (targetRoll - glider.rotation.z) * yawResponse * dt;
 
-  desiredCamera.set(
-    glider.position.x - Math.sin(heading) * 13,
-    glider.position.y + 5.5,
-    glider.position.z + Math.cos(heading) * 13
-  );
-  camera.position.lerp(desiredCamera, 0.075 * dt);
+  // CAMERA: third-person chase, but intentionally NOT rigidly attached to the glider.
+  // The camera's horizontal follow heading lags behind the glider, so yaw turns
+  // sweep naturally instead of snapping the whole view around with the player.
+  let headingDelta = heading - cameraHeading;
+  headingDelta = Math.atan2(Math.sin(headingDelta), Math.cos(headingDelta));
+  cameraHeading += headingDelta * (1 - Math.pow(0.88, dt));
 
-  lookTarget.set(
-    glider.position.x + tempForward.x * 14,
-    glider.position.y + tempForward.y * 14,
-    glider.position.z + tempForward.z * 14
+  desiredCamera.set(
+    glider.position.x - Math.sin(cameraHeading) * 15,
+    glider.position.y + 6.5,
+    glider.position.z + Math.cos(cameraHeading) * 15
   );
-  camera.lookAt(lookTarget);
+  camera.position.lerp(desiredCamera, 0.055 * dt);
+
+  // Also smooth the point the camera looks toward. This prevents a hard pan when
+  // the glider changes direction, while still keeping the aircraft centred.
+  lookTarget.set(
+    glider.position.x + tempForward.x * 12,
+    glider.position.y + tempForward.y * 12,
+    glider.position.z + tempForward.z * 12
+  );
+  smoothedLookTarget.lerp(lookTarget, 0.075 * dt);
+  camera.lookAt(smoothedLookTarget);
 
   updateHud();
   renderer.render(scene, camera);
