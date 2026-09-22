@@ -61,12 +61,14 @@ function addLandmark(x: number, z: number, height: number, width: number) {
 const SYDNEY_LAT = -33.8688;
 const SYDNEY_LON = 151.2093;
 
-function createSydneyCity() {
+async function createSydneyCity(onProgress: (progress: number) => void = () => {}) {
   // Keep the whole prototype GPU-light: one shared box geometry + one
   // InstancedMesh instead of thousands of independent Three.js meshes.
   const blockSize = 55;
   const half = 2450;
   const positions: Array<{x:number; z:number; width:number; depth:number; height:number}> = [];
+  const totalRows = Math.floor((half * 2) / blockSize) + 1;
+  let row = 0;
 
   for (let x = -half; x <= half; x += blockSize) {
     for (let z = -half; z <= half; z += blockSize) {
@@ -90,6 +92,9 @@ function createSydneyCity() {
 
       positions.push({x, z, width, depth, height});
     }
+    row++;
+    onProgress(Math.min(55, Math.round((row / totalRows) * 55)));
+    if (row % 8 === 0) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
   }
 
   const geometry = new THREE.BoxGeometry(1, 1, 1);
@@ -111,6 +116,8 @@ function createSydneyCity() {
 
   instanced.instanceMatrix.needsUpdate = true;
   scene.add(instanced);
+  onProgress(70);
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
 
   // Harbour proxy north/east of the CBD.
   const water = new THREE.Mesh(
@@ -119,11 +126,36 @@ function createSydneyCity() {
   );
   water.position.set(800, -0.88, -1200);
   scene.add(water);
+  onProgress(80);
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
 
   // Three cheap vertical navigation markers.
   addLandmark(0, -90, 52, 11);
   addLandmark(95, 55, 42, 13);
   addLandmark(-105, 65, 34, 15);
+
+  // 3D street network: low-profile instanced strips aligned to the same
+  // deterministic city grid. These are deliberately cheap so streets remain
+  // visible from altitude without creating thousands of individual meshes.
+  const roadPositions: Array<{x:number; z:number; width:number; depth:number}> = [];
+  for (let x = -half; x <= half; x += 275) {
+    roadPositions.push({x, z:0, width:11, depth:half * 2});
+  }
+  for (let z = -half; z <= half; z += 330) {
+    roadPositions.push({x:0, z, width:half * 2, depth:11});
+  }
+  const roadGeometry = new THREE.BoxGeometry(1, 0.035, 1);
+  const roadMaterial = new THREE.MeshBasicMaterial({color: 0x4f5558});
+  const roads = new THREE.InstancedMesh(roadGeometry, roadMaterial, roadPositions.length);
+  roadPositions.forEach((r, i) => {
+    scale.set(r.width, 1, r.depth);
+    matrix.compose(new THREE.Vector3(r.x, 0.018, r.z), new THREE.Quaternion(), scale);
+    roads.setMatrixAt(i, matrix);
+  });
+  roads.instanceMatrix.needsUpdate = true;
+  scene.add(roads);
+  onProgress(94);
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
 
   cityLabel.textContent = 'SYDNEY • LIGHTWEIGHT CITY';
 }
@@ -320,11 +352,16 @@ Object.assign(home.style, {
 });
 home.innerHTML = '<div style="font-size:54px;font-weight:900;letter-spacing:2px">CITY GLIDER</div>' +
   '<div style="font-size:20px;margin-top:8px">SYDNEY • 1000m</div>' +
-  '<button id="playButton" style="margin-top:34px;padding:16px 46px;border:0;border-radius:12px;font-size:22px;font-weight:800;cursor:pointer">PLAY</button>';
+  '<div id="loadingPanel" style="width:min(420px,78vw);margin-top:30px;display:none">' +
+  '<div id="loadingText" style="font-size:16px;margin-bottom:10px">LOADING CITY 0%</div>' +
+  '<div style="height:12px;background:rgba(0,0,0,.22);border-radius:8px;overflow:hidden">' +
+  '<div id="loadingBar" style="width:0%;height:100%;background:#fff;border-radius:8px;transition:width .15s ease"></div></div></div>' +
+  '<button id="playButton" style="margin-top:34px;padding:16px 46px;border:0;border-radius:12px;font-size:22px;font-weight:800;cursor:pointer">LOAD</button>';
 document.body.appendChild(home);
 
 const playButton = document.getElementById('playButton') as HTMLButtonElement;
 let gameStarted = false;
+let cityLoaded = false;
 
 let score = 0;
 let distance = 0;
@@ -351,28 +388,54 @@ updateHud();
 
 drawMinimap();
 
-function startGame() {
-  if (gameStarted) return;
+async function startGame() {
+  if (gameStarted || cityLoaded) return;
+
   gameStarted = true;
   playButton.disabled = true;
   playButton.textContent = 'LOADING…';
-  home.style.background = '#8fc5e8';
+
+  const loadingPanel = document.getElementById('loadingPanel') as HTMLDivElement;
+  const loadingText = document.getElementById('loadingText') as HTMLDivElement;
+  const loadingBar = document.getElementById('loadingBar') as HTMLDivElement;
+  loadingPanel.style.display = 'block';
   cityLabel.textContent = 'SYDNEY • LOADING CITY';
 
-  // Give the browser a frame to paint the lightweight loading screen before
-  // doing the synchronous prototype city build.
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      createSydneyCity();
-      cityLabel.textContent = 'SYDNEY • LIGHTWEIGHT CITY';
-      hud.style.display = 'block';
-      minimap.style.display = 'block';
-      home.remove();
-      resetRun();
-      previousTime = performance.now();
+  try {
+    await createSydneyCity((progress) => {
+      loadingText.textContent = 'LOADING CITY ' + progress + '%';
+      loadingBar.style.width = progress + '%';
     });
-  });
+
+    loadingText.textContent = 'CITY READY';
+    loadingBar.style.width = '100%';
+    cityLoaded = true;
+    playButton.disabled = false;
+    playButton.textContent = 'PLAY';
+    playButton.style.display = 'inline-block';
+    cityLabel.textContent = 'SYDNEY • LIGHTWEIGHT CITY';
+  } catch (error) {
+    console.error(error);
+    gameStarted = false;
+    loadingText.textContent = 'LOAD FAILED — TRY AGAIN';
+    loadingBar.style.width = '0%';
+    playButton.disabled = false;
+    playButton.textContent = 'LOAD';
+  }
 }
+
+playButton.addEventListener('click', () => {
+  if (!cityLoaded) {
+    startGame();
+    return;
+  }
+
+  home.remove();
+  hud.style.display = 'block';
+  minimap.style.display = 'block';
+  resetRun();
+  previousTime = performance.now();
+});
 
 playButton.addEventListener('click', startGame);
 
