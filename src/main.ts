@@ -228,15 +228,51 @@ function addBuildingLayer() {
   }, labelLayer?.id);
 }
 
+let mapLoadFailed = false;
+
 map.on('load', () => {
-  addBuildingLayer();
+  // The base map is playable even if the optional custom 3D building layer fails.
   mapReady = true;
   message.innerHTML = '<b>SYDNEY READY</b><small>Arrow keys / WASD to fly</small>';
-  setTimeout(() => { if (!crashed) message.style.display = 'none'; }, 1200);
-  cameraUpdate();
+
+  try {
+    addBuildingLayer();
+  } catch (error) {
+    console.warn('Optional 3D building layer failed to load:', error);
+  }
+
+  setTimeout(() => {
+    if (!crashed && !mapLoadFailed) message.style.display = 'none';
+  }, 1200);
+
+  try {
+    cameraUpdate();
+  } catch (error) {
+    console.warn('Initial camera positioning failed:', error);
+  }
 });
 
-map.on('error', e => console.warn('Map error', e));
+map.on('error', e => {
+  console.warn('Map error', e);
+  if (!mapReady) {
+    mapLoadFailed = true;
+    message.style.display = 'block';
+    message.innerHTML =
+      '<b>SYDNEY MAP IS TAKING TOO LONG</b>' +
+      '<small>Check your connection, then refresh. The game will not stay stuck silently.</small>';
+  }
+});
+
+// Never leave the player on an unexplained infinite loading screen.
+setTimeout(() => {
+  if (!mapReady) {
+    mapLoadFailed = true;
+    message.style.display = 'block';
+    message.innerHTML =
+      '<b>SYDNEY MAP FAILED TO LOAD</b>' +
+      '<small>OpenFreeMap did not respond. Refresh to retry.</small>';
+  }
+}, 12000);
 
 let last = performance.now();
 function frame(now:number) {
