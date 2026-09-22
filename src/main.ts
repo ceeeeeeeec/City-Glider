@@ -250,7 +250,8 @@ function animate(now = performance.now()) {
   if (crashed) {
     crashTimer += dt;
     glider.rotation.z += 0.025 * dt;
-    glider.position.y = Math.max(0.35, glider.position.y - 0.012 * dt);
+    // Freeze the glider at the collision point; don't let the crash animation
+    // move it into the sky/void and away from the object that caused the crash.
     updateHud();
     renderer.render(scene, camera);
     return;
