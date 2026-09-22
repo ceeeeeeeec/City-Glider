@@ -52,6 +52,8 @@ for (let x = -CITY_EXTENT; x <= CITY_EXTENT; x += 14) {
       seed % 6 === 0 ? darkBuildingMaterial : buildingMaterial
     );
     building.position.set(x, height / 2 - 0.5, z);
+    building.userData.width = width;
+    building.userData.height = height;
     scene.add(building);
     buildings.push(building);
   }
@@ -295,9 +297,9 @@ function animate(now = performance.now()) {
     for (const building of buildings) {
       const dx = Math.abs(gliderPoint.x - building.position.x);
       const dz = Math.abs(gliderPoint.z - building.position.z);
-      const halfX = building.scale.x * 0.5 + 1.0;
-      const halfZ = building.scale.z * 0.5 + 1.0;
-      const top = building.position.y + building.geometry.boundingBox!.max.y;
+      const halfX = (building.userData.width as number) * 0.5 + 1.0;
+      const halfZ = (building.userData.width as number) * 0.5 + 1.0;
+      const top = building.position.y + (building.userData.height as number) * 0.5;
 
       if (dx < halfX && dz < halfZ && gliderPoint.y < top + 0.8) {
         crash();
