@@ -387,7 +387,6 @@ function updateHud() {
 }
 updateHud();
 
-drawMinimap();
 
 playButton.onclick = () => {
   // Handle the two states explicitly: LOAD builds the city, PLAY starts the run.
@@ -485,6 +484,9 @@ const pitchUpRate = 1.35;
 const pitchDownRate = 2.15;
 const velocityAlignment = 2.8;
 const startPosition = new THREE.Vector3(0, 500, 155);
+
+// Initial minimap render after flight state (including heading) has been initialized.
+drawMinimap();
 
 function resetRun() {
   glider.position.copy(startPosition);
