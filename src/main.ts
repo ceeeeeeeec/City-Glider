@@ -183,30 +183,61 @@ function hudUpdate() {
 }
 
 function addBuildingLayer() {
-  if (map.getSource('openfreemap-buildings')) return;
-  map.addSource('openfreemap-buildings', {
-    type: 'vector',
-    url: 'https://tiles.openfreemap.org/planet'
-  });
+  if (map.getLayer('city-glider-3d-buildings')) return;
+
+  const existingBuildingLayer = (map.getStyle().layers || []).find(layer =>
+    layer.type === 'fill-extrusion' && (layer as any)['source-layer'] === 'building'
+  );
+
+  if (existingBuildingLayer) return;
+
+  if (!map.getSource('openfreemap-buildings')) {
+    map.addSource('openfreemap-buildings', {
+      type: 'vector',
+      url: 'https://tiles.openfreemap.org/planet'
+    });
+  }
+
   const layers = map.getStyle().layers || [];
   const labelLayer = layers.find(layer =>
     layer.type === 'symbol' && Boolean((layer as any).layout?.['text-field'])
   );
+
   map.addLayer({
     id: 'city-glider-3d-buildings',
     source: 'openfreemap-buildings',
     'source-layer': 'building',
     type: 'fill-extrusion',
     minzoom: 13,
-    filter: ['!=', ['get', 'hide_3d'], true],
+    filter: [
+      'all',
+      ['!=', ['get', 'hide_3d'], true],
+      ['has', 'render_height']
+    ],
     paint: {
-      'fill-extrusion-color': ['coalesce', ['get', 'colour'], '#b9b6ad'],
-      'fill-extrusion-height': ['interpolate', ['linear'], ['zoom'], 13, 0, 15, ['get', 'render_height']],
-      'fill-extrusion-base': ['case', ['>=', ['zoom'], 15], ['get', 'render_min_height'], 0],
-      'fill-extrusion-opacity': 0.92,
+      'fill-extrusion-color': [
+        'interpolate',
+        ['linear'],
+        ['get', 'render_height'],
+        0, '#d8d4cc',
+        40, '#aaa69d',
+        120, '#817d76',
+        300, '#5f5b56'
+      ],
+      'fill-extrusion-height': [
+        'interpolate',
+        ['linear'],
+        ['zoom'],
+        13, 0,
+        15, ['get', 'render_height']
+      ],
+      'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0],
+      'fill-extrusion-opacity': 0.94,
       'fill-extrusion-vertical-gradient': true
     }
   }, labelLayer?.id);
+
+  console.info('City Glider 3D buildings enabled');
 }
 
 let mapLoadFailed = false;
@@ -252,7 +283,7 @@ try {
     bearing: 0,
     maxPitch: 85,
     centerClampedToGround: false,
-    antialias: false,
+    canvasContextAttributes: { antialias: true },
     attributionControl: true,
     interactive: false,
   });
