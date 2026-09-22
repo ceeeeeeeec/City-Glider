@@ -132,7 +132,7 @@ function updateHud() {
   hud.innerHTML =
     '<b>CITY GLIDER</b><br>' +
     '<span style="font-size:14px;font-weight:normal">' +
-    '← → STEER &nbsp; ↑ DIVE &nbsp; ↓ CLIMB' +
+    '← → STEER &nbsp; ↑ CLIMB &nbsp; ↓ DIVE' +
     '</span><br>' +
     '<span style="font-size:14px">COINS: ' + score + ' / ' + COIN_COUNT +
     ' &nbsp; DISTANCE: ' + Math.floor(distance) + 'm</span>' +
@@ -170,20 +170,20 @@ addEventListener('keyup', (event) => {
 });
 
 // ---------- FLIGHT ----------
-let speed = 0.34;
-let verticalSpeed = -0.005;
+let speed = 0.48;
+let verticalSpeed = 0.01;
 let heading = 0;
 let turnRate = 0;
 
-const minSpeed = 0.22;
-const maxSpeed = 0.62;
-const gravity = 0.0028;
-const liftStrength = 0.010;
-const turnAcceleration = 0.0028;
+const minSpeed = 0.30;
+const maxSpeed = 0.90;
+const gravity = 0.0015;
+const liftStrength = 0.014;
+const turnAcceleration = 0.0018;
 const turnDrag = 0.82;
 const maxTurnRate = 0.018;
-const climbAcceleration = 0.0035;
-const diveAcceleration = 0.0035;
+const climbAcceleration = 0.0065;
+const diveAcceleration = 0.0055;
 
 const startPosition = new THREE.Vector3(0, 18, 155);
 
@@ -246,22 +246,22 @@ function animate(now = performance.now()) {
   }
 
   // Deliberately gentle steering: left means left, right means right.
-  if (keys.ArrowLeft) turnRate += turnAcceleration * dt;
-  if (keys.ArrowRight) turnRate -= turnAcceleration * dt;
+  if (keys.ArrowLeft) turnRate -= turnAcceleration * dt;
+  if (keys.ArrowRight) turnRate += turnAcceleration * dt;
   turnRate *= Math.pow(turnDrag, dt);
   turnRate = THREE.MathUtils.clamp(turnRate, -maxTurnRate, maxTurnRate);
   heading += turnRate * dt;
 
-  // Flight controls use aircraft-style pitch: UP dives, DOWN climbs.
-  if (keys.ArrowUp) verticalSpeed -= diveAcceleration * dt;
-  if (keys.ArrowDown) verticalSpeed += climbAcceleration * dt;
+  // Intuitive vertical controls: UP climbs, DOWN dives.
+  if (keys.ArrowUp) verticalSpeed += climbAcceleration * dt;
+  if (keys.ArrowDown) verticalSpeed -= diveAcceleration * dt;
 
   verticalSpeed -= gravity * dt;
   verticalSpeed += Math.max(0, speed - minSpeed) * liftStrength * dt;
   verticalSpeed *= Math.pow(0.985, dt);
 
-  if (keys.ArrowUp) speed += 0.0025 * dt;
-  if (keys.ArrowDown) speed -= 0.0015 * dt;
+  if (keys.ArrowUp) speed += 0.0015 * dt;
+  if (keys.ArrowDown) speed += 0.0035 * dt;
   speed *= Math.pow(0.998, dt);
   speed = THREE.MathUtils.clamp(speed, minSpeed, maxSpeed);
 
