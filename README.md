@@ -19,3 +19,6 @@ Candidate sources include OpenStreetMap-derived building footprints/heights and 
 
 ## Development
 The initial prototype is browser-first. See docs/PROTOTYPE.md for the current architecture and data-source plan.
+
+
+Stable baseline deployment checkpoint.
