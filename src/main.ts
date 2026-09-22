@@ -123,18 +123,31 @@ async function loadSydneyBuildings() {
       })
       .slice(0, 8500);
 
-    for (const el of elements) {
-      const tags = el.tags ?? {};
-      let height = Number.parseFloat(tags.height ?? '');
-      if (!Number.isFinite(height)) {
-        const levels = Number.parseFloat(tags['building:levels'] ?? '');
-        height = Number.isFinite(levels) ? levels * 3.2 : 9;
+    // Never build thousands of ExtrudeGeometry meshes in one synchronous burst.
+    // Doing so blocks the browser's main thread and prevents the first frame
+    // (including the glider) from being rendered.
+    const batchSize = 100;
+    for (let i = 0; i < elements.length; i += batchSize) {
+      const batch = elements.slice(i, i + batchSize);
+      for (const el of batch) {
+        const tags = el.tags ?? {};
+        let height = Number.parseFloat(tags.height ?? '');
+        if (!Number.isFinite(height)) {
+          const levels = Number.parseFloat(tags['building:levels'] ?? '');
+          height = Number.isFinite(levels) ? levels * 3.2 : 9;
+        }
+
+        addOSMBuilding(
+          el.geometry.map((p: any) => ({ lat: p.lat, lon: p.lon })),
+          height
+        );
       }
 
-      addOSMBuilding(
-        el.geometry.map((p: any) => ({ lat: p.lat, lon: p.lon })),
-        height
-      );
+      cityLabel.textContent = 'SYDNEY • BUILDING CITY ' +
+        Math.min(i + batchSize, elements.length) + '/' + elements.length;
+
+      // Yield to the renderer between batches.
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
     }
 
     cityLabel.textContent = 'SYDNEY • REAL OSM BUILDINGS';
