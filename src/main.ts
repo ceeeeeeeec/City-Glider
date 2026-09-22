@@ -62,6 +62,7 @@ function addLandmark(x: number, z: number, height: number, width: number) {
 const SYDNEY_LAT = -33.8688;
 const SYDNEY_LON = 151.2093;
 const CITY_RADIUS_M = 5000;
+let cityLoaded = false;
 
 function createSydneyCity() {
   // Keep the whole prototype GPU-light: one shared box geometry + one
@@ -140,8 +141,6 @@ Object.assign(cityLabel.style, {
 cityLabel.textContent = 'SYDNEY • LOADING CITY';
 document.body.appendChild(cityLabel);
 
-createSydneyCity();
-
 // ---------- GLIDER ----------
 const glider = new THREE.Group();
 
@@ -191,12 +190,31 @@ Object.assign(hud.style, {
   lineHeight: '1.35'
 });
 document.body.appendChild(hud);
+hud.style.display = 'none';
+
+// ---------- HOME / LOADING ----------
+const home = document.createElement('div');
+Object.assign(home.style, {
+  position: 'fixed', inset: '0', zIndex: '20', display: 'flex',
+  alignItems: 'center', justifyContent: 'center', flexDirection: 'column',
+  background: 'linear-gradient(#8fc5e8, #d9eef7)', color: '#fff',
+  fontFamily: 'system-ui, sans-serif', textAlign: 'center',
+  textShadow: '0 3px 8px #234',
+});
+home.innerHTML = '<div style="font-size:54px;font-weight:900;letter-spacing:2px">CITY GLIDER</div>' +
+  '<div style="font-size:20px;margin-top:8px">SYDNEY • 1000m</div>' +
+  '<button id="playButton" style="margin-top:34px;padding:16px 46px;border:0;border-radius:12px;font-size:22px;font-weight:800;cursor:pointer">PLAY</button>';
+document.body.appendChild(home);
+
+const playButton = document.getElementById('playButton') as HTMLButtonElement;
+let gameStarted = false;
 
 let score = 0;
 let distance = 0;
 let crashed = false;
 let crashTimer = 0;
 let speed = 55;
+let previousTime = performance.now();
 
 function updateHud() {
   hud.innerHTML =
@@ -214,6 +232,31 @@ function updateHud() {
 }
 updateHud();
 
+function startGame() {
+  if (gameStarted) return;
+  gameStarted = true;
+  playButton.disabled = true;
+  playButton.textContent = 'LOADING…';
+  home.style.background = '#8fc5e8';
+  cityLabel.textContent = 'SYDNEY • LOADING CITY';
+
+  // Give the browser a frame to paint the lightweight loading screen before
+  // doing the synchronous prototype city build.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      createSydneyCity();
+      cityLoaded = true;
+      cityLabel.textContent = 'SYDNEY • LIGHTWEIGHT CITY';
+      hud.style.display = 'block';
+      home.remove();
+      resetRun();
+      previousTime = performance.now();
+    });
+  });
+}
+
+playButton.addEventListener('click', startGame);
+
 // ---------- INPUT ----------
 const keys = {
   ArrowLeft: false,
@@ -228,7 +271,7 @@ addEventListener('keydown', (event) => {
     event.preventDefault();
   }
 
-  if (event.code === 'Space' && crashed) {
+  if (event.code === 'Space' && crashed && gameStarted) {
     resetRun();
     event.preventDefault();
   }
@@ -388,6 +431,11 @@ function animate(now = performance.now()) {
 
   const dt = Math.min((now - previousTime) / 1000, 0.033);
   previousTime = now;
+
+  if (!gameStarted) {
+    renderer.render(scene, camera);
+    return;
+  }
 
   if (crashed) {
     crashTimer += dt;
