@@ -246,6 +246,7 @@ let score = 0;
 let distance = 0;
 let crashed = false;
 let crashTimer = 0;
+let speed = 55;
 
 function updateHud() {
   hud.innerHTML =
@@ -298,7 +299,6 @@ addEventListener('keyup', (event) => {
 // aircraft model. citeturn0search3turn0search9
 let heading = 0;
 let pitch = 0;
-let speed = 55;
 
 const velocity = new THREE.Vector3(0, -5, -55);
 const desiredForward = new THREE.Vector3();
