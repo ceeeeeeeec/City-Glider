@@ -3,13 +3,13 @@ import './style.css';
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8fc5e8);
-scene.fog = new THREE.Fog(0x8fc5e8, 900, 5200);
+// Keep the prototype fully visible while we verify the 3D render path. Fog will return once the scene is proven.\n// scene.fog = new THREE.Fog(0x8fc5e8, 900, 5200);
 
 const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.5, 12000);
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.setSize(innerWidth, innerHeight);
-renderer.setClearColor(0x8fc5e8);
+renderer.setClearColor(0x8fc5e8);\nrenderer.debug.checkShaderErrors = true;
 document.body.appendChild(renderer.domElement);
 
 scene.add(new THREE.HemisphereLight(0xe8f6ff, 0x405060, 2.4));
@@ -52,7 +52,7 @@ for (let i = 0; i < blocks.length; i++) {
 
 const water = new THREE.Mesh(
   new THREE.PlaneGeometry(1900, 1000),
-  new THREE.MeshStandardMaterial({ color: 0x4d91b0, roughness: 0.35, metalness: 0.05 })
+  new THREE.MeshBasicMaterial({ color: 0x3f88b0 })
 );
 water.rotation.x = -Math.PI / 2;
 water.position.set(950, 0.5, -20);
@@ -62,7 +62,7 @@ const coins: THREE.Mesh[] = [];
 for (let i = 0; i < 24; i++) {
   const c = new THREE.Mesh(
     new THREE.TorusGeometry(7, 2.2, 8, 16),
-    new THREE.MeshStandardMaterial({ color: 0xffd447, metalness: 0.5, roughness: 0.35 })
+    new THREE.MeshBasicMaterial({ color: 0xffff00 })
   );
   const t = i / 23;
   c.position.set(-120 + t * 240, 430 - t * 80, -760 + t * 1050);
@@ -72,16 +72,16 @@ for (let i = 0; i < 24; i++) {
 }
 
 const glider = new THREE.Group();
-const wingMaterial = new THREE.MeshStandardMaterial({ color: 0x20252b, roughness: 0.7 });
+const wingMaterial = new THREE.MeshBasicMaterial({ color: 0xff00ff });
 const wing = new THREE.Mesh(new THREE.ConeGeometry(20, 72, 3), wingMaterial);
 wing.rotation.z = Math.PI / 2;
 glider.add(wing);
 
-const body = new THREE.Mesh(new THREE.CapsuleGeometry(4, 10, 5, 10), new THREE.MeshStandardMaterial({ color: 0x26323b }));
+const body = new THREE.Mesh(new THREE.CapsuleGeometry(4, 10, 5, 10), new THREE.MeshBasicMaterial({ color: 0x00ffff }));
 body.rotation.z = Math.PI / 2;
 glider.add(body);
 
-const pilot = new THREE.Mesh(new THREE.SphereGeometry(5, 16, 12), new THREE.MeshStandardMaterial({ color: 0xf1c6a5 }));
+const pilot = new THREE.Mesh(new THREE.SphereGeometry(5, 16, 12), new THREE.MeshBasicMaterial({ color: 0xff8800 }));
 pilot.position.y = -7;
 glider.add(pilot);
 scene.add(glider);
