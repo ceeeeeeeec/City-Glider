@@ -38,26 +38,137 @@ const darkBuildingMaterial = new THREE.MeshBasicMaterial({ color: 0x9b9b9b });
 
 const buildings: THREE.Mesh[] = [];
 
-for (let x = -CITY_EXTENT; x <= CITY_EXTENT; x += 14) {
-  for (let z = -CITY_EXTENT; z <= CITY_EXTENT; z += 14) {
-    if (Math.abs(x % 28) < 5 || Math.abs(z % 28) < 5) continue;
-    if (Math.abs(x) < 22 && Math.abs(z) < 22) continue;
+// Sydney CBD origin. The game world is in local metres around this point.
+// We deliberately load real OpenStreetMap building footprints instead of the
+// temporary procedural blocks. This is the first real-city rendering pass.
+const SYDNEY_LAT = -33.8688;
+const SYDNEY_LON = 151.2093;
+const CITY_RADIUS_M = 3500;
 
-    const seed = Math.abs(x * 17 + z * 31);
-    const height = 5 + (seed % 24);
-    const width = 7 + (seed % 4);
+function lonToX(lon: number) {
+  return (lon - SYDNEY_LON) * 111320 * Math.cos(SYDNEY_LAT * Math.PI / 180);
+}
 
-    const building = new THREE.Mesh(
-      new THREE.BoxGeometry(width, height, width),
-      seed % 6 === 0 ? darkBuildingMaterial : buildingMaterial
+function latToZ(lat: number) {
+  return -(lat - SYDNEY_LAT) * 111320;
+}
+
+function addOSMBuilding(points: Array<{lat: number; lon: number}>, height: number) {
+  if (points.length < 3) return;
+
+  const shape = new THREE.Shape();
+  points.forEach((p, i) => {
+    const x = lonToX(p.lon);
+    const z = latToZ(p.lat);
+    if (i === 0) shape.moveTo(x, z);
+    else shape.lineTo(x, z);
+  });
+  shape.closePath();
+
+  const depth = THREE.MathUtils.clamp(height, 3, 180);
+  const geometry = new THREE.ExtrudeGeometry(shape, {
+    depth,
+    bevelEnabled: false,
+    curveSegments: 1,
+    steps: 1
+  });
+
+  // ExtrudeGeometry uses local Z as depth; rotate so depth becomes world Y.
+  geometry.rotateX(-Math.PI / 2);
+
+  const material = height > 45 ? darkBuildingMaterial : buildingMaterial;
+  const building = new THREE.Mesh(geometry, material);
+  building.userData.width = 6;
+  building.userData.height = depth;
+  building.userData.osm = true;
+
+  // Extrusion starts at y=0; keep city at ground level.
+  scene.add(building);
+  buildings.push(building);
+}
+
+async function loadSydneyBuildings() {
+  const radius = CITY_RADIUS_M;
+  const query =
+    '[out:json][timeout:25];' +
+    '(way["building"](around:' + radius + ',' + SYDNEY_LAT + ',' + SYDNEY_LON + '););' +
+    'out tags geom;';
+
+  try {
+    const response = await fetch(
+      'https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query)
     );
-    building.position.set(x, height / 2 - 0.5, z);
-    building.userData.width = width;
-    building.userData.height = height;
-    scene.add(building);
-    buildings.push(building);
+    if (!response.ok) throw new Error('OSM request failed: ' + response.status);
+
+    const data = await response.json();
+
+    // Keep the prototype lightweight: nearest/smaller footprints first and
+    // cap the total number of rendered buildings.
+    const elements = (data.elements ?? [])
+      .filter((el: any) => el.geometry?.length >= 3)
+      .sort((a: any, b: any) => {
+        const ay = a.geometry.reduce((s: number, p: any) => s + latToZ(p.lat), 0) / a.geometry.length;
+        const ax = a.geometry.reduce((s: number, p: any) => s + lonToX(p.lon), 0) / a.geometry.length;
+        const by = b.geometry.reduce((s: number, p: any) => s + latToZ(p.lat), 0) / b.geometry.length;
+        const bx = b.geometry.reduce((s: number, p: any) => s + lonToX(p.lon), 0) / b.geometry.length;
+        return (ax * ax + ay * ay) - (bx * bx + by * by);
+      })
+      .slice(0, 6500);
+
+    for (const el of elements) {
+      const tags = el.tags ?? {};
+      let height = Number.parseFloat(tags.height ?? '');
+      if (!Number.isFinite(height)) {
+        const levels = Number.parseFloat(tags['building:levels'] ?? '');
+        height = Number.isFinite(levels) ? levels * 3.2 : 9;
+      }
+
+      addOSMBuilding(
+        el.geometry.map((p: any) => ({ lat: p.lat, lon: p.lon })),
+        height
+      );
+    }
+
+    cityLabel.textContent = 'SYDNEY • REAL OSM BUILDINGS';
+  } catch (error) {
+    console.warn('Sydney OSM loading failed; using fallback city blocks.', error);
+    cityLabel.textContent = 'SYDNEY • FALLBACK CITY';
+    createFallbackCity();
   }
 }
+
+function createFallbackCity() {
+  for (let x = -CITY_EXTENT; x <= CITY_EXTENT; x += 14) {
+    for (let z = -CITY_EXTENT; z <= CITY_EXTENT; z += 14) {
+      if (Math.abs(x % 28) < 5 || Math.abs(z % 28) < 5) continue;
+      if (Math.abs(x) < 22 && Math.abs(z) < 22) continue;
+
+      const seed = Math.abs(x * 17 + z * 31);
+      const height = 5 + (seed % 24);
+      const width = 7 + (seed % 4);
+      const building = new THREE.Mesh(
+        new THREE.BoxGeometry(width, height, width),
+        seed % 6 === 0 ? darkBuildingMaterial : buildingMaterial
+      );
+      building.position.set(x, height / 2 - 0.5, z);
+      building.userData.width = width;
+      building.userData.height = height;
+      scene.add(building);
+      buildings.push(building);
+    }
+  }
+}
+
+const cityLabel = document.createElement('div');
+Object.assign(cityLabel.style, {
+  position: 'fixed', right: '16px', top: '16px', zIndex: '10',
+  color: '#fff', font: 'bold 16px system-ui',
+  textShadow: '0 2px 5px #000', pointerEvents: 'none'
+});
+cityLabel.textContent = 'SYDNEY • LOADING CITY';
+document.body.appendChild(cityLabel);
+
+void loadSydneyBuildings();
 
 // Simple landmark towers to establish recognizable navigation targets.
 function addLandmark(x: number, z: number, height: number, width: number) {
