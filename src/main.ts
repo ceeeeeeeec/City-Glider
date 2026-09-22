@@ -440,8 +440,6 @@ playButton.addEventListener('click', () => {
   previousTime = performance.now();
 });
 
-playButton.addEventListener('click', startGame);
-
 // ---------- INPUT ----------
 const keys = {
   ArrowLeft: false,
