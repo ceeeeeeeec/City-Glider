@@ -41,7 +41,7 @@ for (let x = -30; x <= 30; x += 10) {
   for (let z = -30; z <= 30; z += 10) {
     if (Math.abs(x) < 11 && Math.abs(z) < 11) continue;
 
-    const height = 3 + ((Math.abs(x * 7 + z * 13) % 9));
+    const height = 3 + (Math.abs(x * 7 + z * 13) % 9);
     const building = new THREE.Mesh(
       new THREE.BoxGeometry(6, height, 6),
       (x + z) % 20 === 0 ? darkBuildingMaterial : buildingMaterial
@@ -82,14 +82,54 @@ Object.assign(hud.style, {
   textShadow: '0 2px 5px #000',
   pointerEvents: 'none'
 });
-hud.innerHTML = 'CITY GLIDER<br><span style="font-size:13px;font-weight:normal">3D CITY FOUNDATION</span>';
+hud.innerHTML = 'CITY GLIDER<br><span style="font-size:13px;font-weight:normal">ARROWS: STEER / CLIMB / DIVE</span>';
 document.body.appendChild(hud);
 
-// Camera follows the glider
+// Keyboard state
+const keys = {
+  ArrowLeft: false,
+  ArrowRight: false,
+  ArrowUp: false,
+  ArrowDown: false
+};
+
+addEventListener('keydown', (event) => {
+  if (event.key in keys) {
+    keys[event.key as keyof typeof keys] = true;
+    event.preventDefault();
+  }
+});
+
+addEventListener('keyup', (event) => {
+  if (event.key in keys) {
+    keys[event.key as keyof typeof keys] = false;
+    event.preventDefault();
+  }
+});
+
+// Flight tuning
+const forwardSpeed = 0.035;
+const horizontalSpeed = 0.075;
+const verticalSpeed = 0.055;
+
 function animate() {
   requestAnimationFrame(animate);
 
-  glider.position.z -= 0.035;
+  // Automatic forward momentum.
+  glider.position.z -= forwardSpeed;
+
+  // Player steering.
+  if (keys.ArrowLeft) glider.position.x -= horizontalSpeed;
+  if (keys.ArrowRight) glider.position.x += horizontalSpeed;
+  if (keys.ArrowUp) glider.position.y += verticalSpeed;
+  if (keys.ArrowDown) glider.position.y -= verticalSpeed;
+
+  // Keep the glider within a safe playable height for this prototype.
+  glider.position.y = Math.max(0.5, Math.min(18, glider.position.y));
+
+  // Bank the glider visually while steering.
+  const targetRoll = keys.ArrowLeft ? 0.35 : keys.ArrowRight ? -0.35 : 0;
+  glider.rotation.z += (targetRoll - glider.rotation.z) * 0.12;
 
   camera.position.x = glider.position.x;
   camera.position.y = glider.position.y + 4;
