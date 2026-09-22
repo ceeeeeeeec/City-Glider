@@ -362,6 +362,7 @@ document.body.appendChild(home);
 const playButton = document.getElementById('playButton') as HTMLButtonElement;
 let gameStarted = false;
 let cityLoaded = false;
+let loadingInProgress = false;
 
 let score = 0;
 let distance = 0;
@@ -389,9 +390,9 @@ updateHud();
 drawMinimap();
 
 async function startGame() {
-  if (gameStarted || cityLoaded) return;
+  if (gameStarted || cityLoaded || loadingInProgress) return;
 
-  gameStarted = true;
+  loadingInProgress = true;
   playButton.disabled = true;
   playButton.textContent = 'LOADING…';
 
@@ -410,13 +411,14 @@ async function startGame() {
     loadingText.textContent = 'CITY READY';
     loadingBar.style.width = '100%';
     cityLoaded = true;
+    loadingInProgress = false;
     playButton.disabled = false;
     playButton.textContent = 'PLAY';
     playButton.style.display = 'inline-block';
     cityLabel.textContent = 'SYDNEY • LIGHTWEIGHT CITY';
   } catch (error) {
     console.error(error);
-    gameStarted = false;
+    loadingInProgress = false;
     loadingText.textContent = 'LOAD FAILED — TRY AGAIN';
     loadingBar.style.width = '0%';
     playButton.disabled = false;
@@ -430,6 +432,7 @@ playButton.addEventListener('click', () => {
     return;
   }
 
+  gameStarted = true;
   home.remove();
   hud.style.display = 'block';
   minimap.style.display = 'block';
