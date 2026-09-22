@@ -35,13 +35,11 @@ const buildingMaterials = [
 ];
 
 const blocks: [number, number, number, number, number][] = [
-  [-140,-160,90,90,180],[0,-170,75,105,260],[130,-150,95,95,210],
-  [-210,-20,80,110,130],[-70,-20,100,90,310],[70,-15,80,110,220],
-  [190,-5,100,90,150],[-170,130,110,85,240],[-35,130,85,95,190],
-  [90,125,110,80,360],[220,135,80,90,175],[-240,270,80,100,110],
-  [-115,270,100,85,155],[20,270,90,90,125],[140,270,95,90,190],
-  [-310,430,70,80,120],[-170,430,80,70,150],[-40,430,70,80,100],
-  [100,430,80,70,180],[230,430,90,80,135]
+  [-300,-520,120,130,180],[-130,-560,110,120,300],[20,-500,130,140,220],[190,-540,120,130,390],
+  [-350,-300,140,120,120],[-170,-280,110,130,260],[-20,-320,150,120,180],[170,-300,130,140,330],[340,-330,120,120,210],
+  [-320,-80,120,150,240],[-150,-70,130,120,420],[20,-100,110,140,280],[180,-80,140,130,190],[350,-100,120,140,360],
+  [-300,170,150,120,150],[-100,190,120,140,320],[60,160,150,120,230],[250,180,120,150,450],[390,170,100,120,170],
+  [-250,420,140,120,220],[-70,430,120,130,150],[100,410,150,120,280],[290,430,130,130,190]
 ];
 
 for (let i = 0; i < blocks.length; i++) {
@@ -67,7 +65,7 @@ for (let i = 0; i < 24; i++) {
     new THREE.MeshStandardMaterial({ color: 0xffd447, metalness: 0.5, roughness: 0.35 })
   );
   const t = i / 23;
-  c.position.set(-430 + t * 780, 390 - t * 190, -650 + t * 1250);
+  c.position.set(-120 + t * 240, 430 - t * 80, -760 + t * 1050);
   c.rotation.y = Math.PI / 2;
   scene.add(c);
   coins.push(c);
@@ -88,8 +86,8 @@ pilot.position.y = -7;
 glider.add(pilot);
 scene.add(glider);
 
-const pos = new THREE.Vector3(-430, 520, -720);
-const vel = new THREE.Vector3(18, -10, 55);
+const pos = new THREE.Vector3(0, 650, -900);
+const vel = new THREE.Vector3(0, -8, 85);
 let alive = true;
 let score = 0;
 
@@ -110,7 +108,7 @@ document.body.appendChild(hud);
 
 const message = document.createElement('div');
 message.id = 'message';
-message.innerHTML = '<strong>GLIDE TEST</strong><small>Arrow keys: steer · Up = dive · Down = pull up</small>';
+message.innerHTML = '<strong>GLIDE TEST</strong><small>Arrow keys: ← → steer · ↑ dive · ↓ pull up</small>';
 document.body.appendChild(message);
 
 const controls = document.createElement('div');
@@ -145,8 +143,8 @@ pad.addEventListener('pointerup', clear);
 pad.addEventListener('pointercancel', clear);
 
 function reset() {
-  pos.set(-430, 520, -720);
-  vel.set(18, -10, 55);
+  pos.set(0, 650, -900);
+  vel.set(0, -8, 85);
   score = 0;
   alive = true;
   coins.forEach(c => c.visible = true);
@@ -166,6 +164,13 @@ function animate() {
     const keyboardY = (keys.has('ArrowDown') ? 1 : 0) - (keys.has('ArrowUp') ? 1 : 0);
     const steerX = input.active ? input.x : keyboardX;
     const pitchInput = input.active ? input.y : keyboardY;
+    // Mirror keyboard state on the on-screen pad so desktop testing and touch testing use the same control language.
+    if (!input.active) {
+      input.x = keyboardX;
+      input.y = keyboardY;
+      const max = pad.getBoundingClientRect().width * 0.34;
+      stick.style.transform = 'translate(' + (keyboardX * max) + 'px,' + (keyboardY * max) + 'px)';
+    }
 
     // Flight model: speed and momentum are retained; control inputs bend the velocity
     // instead of directly moving the player. Up dives, Down pulls the nose up.
@@ -196,10 +201,10 @@ function animate() {
     // True third-person camera: behind and above the moving glider.
     const cameraForward = vel.clone().normalize();
     const desiredCamera = pos.clone()
-      .addScaledVector(cameraForward, -125)
-      .add(new THREE.Vector3(0, 48, 0));
-    camera.position.lerp(desiredCamera, 1 - Math.pow(0.0008, dt));
-    camera.lookAt(pos.clone().addScaledVector(cameraForward, 70));
+      .addScaledVector(cameraForward, -150)
+      .add(new THREE.Vector3(0, 65, 0));
+    camera.position.lerp(desiredCamera, 1 - Math.pow(0.00035, dt));
+    camera.lookAt(pos.clone().addScaledVector(cameraForward, 95));
 
     for (const c of coins) {
       c.rotation.z += dt * 3;
@@ -238,7 +243,7 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
-camera.position.set(-430, 570, -845);
-camera.lookAt(pos);
+camera.position.set(0, 715, -1050);
+camera.lookAt(new THREE.Vector3(0, 500, -650));
 glider.position.copy(pos);
 animate();
