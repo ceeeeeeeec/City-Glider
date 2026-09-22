@@ -356,7 +356,7 @@ home.innerHTML = '<div style="font-size:54px;font-weight:900;letter-spacing:2px"
   '<div id="loadingText" style="font-size:16px;margin-bottom:10px">LOADING CITY 0%</div>' +
   '<div style="height:12px;background:rgba(0,0,0,.22);border-radius:8px;overflow:hidden">' +
   '<div id="loadingBar" style="width:0%;height:100%;background:#fff;border-radius:8px;transition:width .15s ease"></div></div></div>' +
-  '<button id="playButton" style="margin-top:34px;padding:16px 46px;border:0;border-radius:12px;font-size:22px;font-weight:800;cursor:pointer">LOAD</button>';
+  '<button id="playButton" style="position:relative;z-index:30;pointer-events:auto;margin-top:34px;padding:16px 46px;border:0;border-radius:12px;font-size:22px;font-weight:800;cursor:pointer">LOAD</button>';
 document.body.appendChild(home);
 
 const playButton = document.getElementById('playButton') as HTMLButtonElement;
@@ -389,51 +389,41 @@ updateHud();
 
 drawMinimap();
 
-async function startGame() {
-  if (gameStarted || cityLoaded || loadingInProgress) return;
-
-  loadingInProgress = true;
-  playButton.disabled = true;
-  playButton.textContent = 'LOADING…';
-
-  const loadingPanel = document.getElementById('loadingPanel') as HTMLDivElement;
-  const loadingText = document.getElementById('loadingText') as HTMLDivElement;
-  const loadingBar = document.getElementById('loadingBar') as HTMLDivElement;
-  loadingPanel.style.display = 'block';
-  loadingText.textContent = 'LOADING CITY 0%';
-  loadingBar.style.width = '0%';
-  cityLabel.textContent = 'SYDNEY • LOADING CITY';
-
-  // Let the browser paint the loading state before doing any city generation.
-  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
-
-  try {
-    await createSydneyCity((progress) => {
-      loadingText.textContent = 'LOADING CITY ' + progress + '%';
-      loadingBar.style.width = progress + '%';
-    });
-
-    loadingText.textContent = 'CITY READY';
-    loadingBar.style.width = '100%';
-    cityLoaded = true;
-    loadingInProgress = false;
-    playButton.disabled = false;
-    playButton.textContent = 'PLAY';
-    playButton.style.display = 'inline-block';
-    cityLabel.textContent = 'SYDNEY • LIGHTWEIGHT CITY';
-  } catch (error) {
-    console.error(error);
-    loadingInProgress = false;
-    loadingText.textContent = 'LOAD FAILED — TRY AGAIN';
-    loadingBar.style.width = '0%';
-    playButton.disabled = false;
-    playButton.textContent = 'LOAD';
-  }
-}
-
-playButton.addEventListener('click', () => {
+playButton.onclick = () => {
+  // Handle the two states explicitly: LOAD builds the city, PLAY starts the run.
   if (!cityLoaded) {
-    startGame();
+    if (loadingInProgress) return;
+    playButton.textContent = 'LOADING…';
+    loadingInProgress = true;
+    playButton.disabled = true;
+    const loadingPanel = document.getElementById('loadingPanel') as HTMLDivElement;
+    const loadingText = document.getElementById('loadingText') as HTMLDivElement;
+    const loadingBar = document.getElementById('loadingBar') as HTMLDivElement;
+    loadingPanel.style.display = 'block';
+    loadingText.textContent = 'LOADING CITY 0%';
+    loadingBar.style.width = '0%';
+    cityLabel.textContent = 'SYDNEY • LOADING CITY';
+    requestAnimationFrame(() => {
+      createSydneyCity((progress) => {
+        loadingText.textContent = 'LOADING CITY ' + progress + '%';
+        loadingBar.style.width = progress + '%';
+      }).then(() => {
+        loadingText.textContent = 'CITY READY';
+        loadingBar.style.width = '100%';
+        cityLoaded = true;
+        loadingInProgress = false;
+        playButton.disabled = false;
+        playButton.textContent = 'PLAY';
+        cityLabel.textContent = 'SYDNEY • LIGHTWEIGHT CITY';
+      }).catch((error) => {
+        console.error(error);
+        loadingInProgress = false;
+        loadingText.textContent = 'LOAD FAILED — TRY AGAIN';
+        loadingBar.style.width = '0%';
+        playButton.disabled = false;
+        playButton.textContent = 'LOAD';
+      });
+    });
     return;
   }
 
@@ -443,7 +433,7 @@ playButton.addEventListener('click', () => {
   minimap.style.display = 'block';
   resetRun();
   previousTime = performance.now();
-});
+};
 
 // ---------- INPUT ----------
 const keys = {
