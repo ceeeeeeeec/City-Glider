@@ -351,7 +351,7 @@ Object.assign(home.style, {
   textShadow: '0 3px 8px #234',
 });
 home.innerHTML = '<div style="font-size:54px;font-weight:900;letter-spacing:2px">CITY GLIDER</div>' +
-  '<div style="font-size:20px;margin-top:8px">SYDNEY • 1000m</div>' +
+  '<div style="font-size:20px;margin-top:8px">SYDNEY</div>' +
   '<div id="loadingPanel" style="width:min(420px,78vw);margin-top:30px;display:none">' +
   '<div id="loadingText" style="font-size:16px;margin-bottom:10px">LOADING CITY 0%</div>' +
   '<div style="height:12px;background:rgba(0,0,0,.22);border-radius:8px;overflow:hidden">' +
@@ -400,7 +400,12 @@ async function startGame() {
   const loadingText = document.getElementById('loadingText') as HTMLDivElement;
   const loadingBar = document.getElementById('loadingBar') as HTMLDivElement;
   loadingPanel.style.display = 'block';
+  loadingText.textContent = 'LOADING CITY 0%';
+  loadingBar.style.width = '0%';
   cityLabel.textContent = 'SYDNEY • LOADING CITY';
+
+  // Let the browser paint the loading state before doing any city generation.
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
 
   try {
     await createSydneyCity((progress) => {
