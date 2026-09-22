@@ -299,8 +299,6 @@ addEventListener('keyup', (event) => {
 let heading = 0;
 let pitch = 0;
 let speed = 55;
-let crashed = false;
-let crashTimer = 0;
 
 const velocity = new THREE.Vector3(0, -5, -55);
 const desiredForward = new THREE.Vector3();
