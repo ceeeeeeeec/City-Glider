@@ -170,30 +170,36 @@ addEventListener('keyup', (event) => {
 });
 
 // ---------- FLIGHT ----------
-let speed = 0.48;
-let verticalSpeed = 0.01;
+let speed = 0.42;
+let verticalSpeed = 0;
 let heading = 0;
-let turnRate = 0;
+let pitch = 0;
 
-const minSpeed = 0.30;
-const maxSpeed = 0.90;
-const gravity = 0.0015;
-const liftStrength = 0.014;
-const turnAcceleration = 0.0018;
-const turnDrag = 0.82;
-const maxTurnRate = 0.018;
-const climbAcceleration = 0.0065;
-const diveAcceleration = 0.0055;
+const minSpeed = 0.28;
+const maxSpeed = 0.78;
 
+// Arcade wingsuit/glider model inspired by the feel of Just Cause 3:
+// strong forward momentum, easy diving, gentle climbing, responsive yaw,
+// and enough pitch authority to carry through the zenith into a loop.
+const gravity = 0.0017;
+const liftStrength = 0.0065;
+const turnRate = 0.028;
+const yawResponse = 0.14;
+const climbPitchRate = 0.006;
+const divePitchRate = 0.014;
+const pitchReturn = 0.985;
 const startPosition = new THREE.Vector3(0, 18, 155);
+
+let yawVelocity = 0;
 
 function resetRun() {
   glider.position.copy(startPosition);
   glider.rotation.set(0, 0, 0);
-  speed = 0.34;
-  verticalSpeed = -0.005;
+  speed = 0.42;
+  verticalSpeed = 0;
   heading = 0;
-  turnRate = 0;
+  pitch = 0;
+  yawVelocity = 0;
   score = 0;
   distance = 0;
   crashed = false;
@@ -245,42 +251,52 @@ function animate(now = performance.now()) {
     return;
   }
 
-  // Deliberately gentle steering: left means left, right means right.
-  if (keys.ArrowLeft) turnRate -= turnAcceleration * dt;
-  if (keys.ArrowRight) turnRate += turnAcceleration * dt;
-  turnRate *= Math.pow(turnDrag, dt);
-  turnRate = THREE.MathUtils.clamp(turnRate, -maxTurnRate, maxTurnRate);
-  heading += turnRate * dt;
+  // LEFT/RIGHT: direct, responsive yaw. Turning is deliberately independent
+  // of the forward speed so the glider remains manoeuvrable at speed.
+  if (keys.ArrowLeft) yawVelocity -= turnRate * dt;
+  if (keys.ArrowRight) yawVelocity += turnRate * dt;
+  yawVelocity *= Math.pow(0.82, dt);
+  yawVelocity = THREE.MathUtils.clamp(yawVelocity, -0.055, 0.055);
+  heading += yawVelocity * dt;
 
-  // Intuitive vertical controls: UP climbs, DOWN dives.
-  if (keys.ArrowUp) verticalSpeed += climbAcceleration * dt;
-  if (keys.ArrowDown) verticalSpeed -= diveAcceleration * dt;
+  // UP/DOWN: pitch control. Diving is substantially stronger than climbing.
+  // Pitch is allowed to pass +/-90 degrees, so a pull-up can continue into
+  // a loop/flip at the zenith instead of hitting an artificial ceiling.
+  if (keys.ArrowUp) pitch += climbPitchRate * dt;
+  if (keys.ArrowDown) pitch -= divePitchRate * dt;
 
+  // Natural pitch damping, but retain momentum through a loop.
+  pitch *= Math.pow(pitchReturn, dt);
+
+  // Keep some gravity, but let the glider's orientation determine most of
+  // the vertical movement.
   verticalSpeed -= gravity * dt;
-  verticalSpeed += Math.max(0, speed - minSpeed) * liftStrength * dt;
-  verticalSpeed *= Math.pow(0.985, dt);
+  verticalSpeed += Math.sin(pitch) * liftStrength * speed * dt;
+  verticalSpeed *= Math.pow(0.992, dt);
 
-  if (keys.ArrowUp) speed += 0.0015 * dt;
-  if (keys.ArrowDown) speed += 0.0035 * dt;
-  speed *= Math.pow(0.998, dt);
+  // Diving adds energy; climbing costs a little. This makes downward flight
+  // easy to initiate while preserving substantial forward momentum.
+  if (keys.ArrowDown) speed += 0.004 * dt;
+  if (keys.ArrowUp) speed -= 0.0012 * dt;
+  speed *= Math.pow(0.9985, dt);
   speed = THREE.MathUtils.clamp(speed, minSpeed, maxSpeed);
 
+  // True 3D flight vector.
   tempForward.set(
-    Math.sin(heading),
-    verticalSpeed / Math.max(speed, 0.01),
-    -Math.cos(heading)
+    Math.sin(heading) * Math.cos(pitch),
+    Math.sin(pitch),
+    -Math.cos(heading) * Math.cos(pitch)
   ).normalize();
 
   const oldX = glider.position.x;
   const oldZ = glider.position.z;
 
   glider.position.x += tempForward.x * speed * dt;
-  glider.position.y += verticalSpeed * dt;
+  glider.position.y += tempForward.y * speed * dt + verticalSpeed * dt;
   glider.position.z += tempForward.z * speed * dt;
 
   distance += Math.hypot(glider.position.x - oldX, glider.position.z - oldZ);
 
-  // Ground / world limits.
   if (glider.position.y <= 0.35) {
     glider.position.y = 0.35;
     crash();
@@ -291,7 +307,7 @@ function animate(now = performance.now()) {
     crash();
   }
 
-  // Lightweight building collision using bounding boxes.
+  // Lightweight building collision.
   if (!crashed) {
     const gliderPoint = glider.position;
     for (const building of buildings) {
@@ -308,7 +324,6 @@ function animate(now = performance.now()) {
     }
   }
 
-  // Collect nearby coins.
   for (const coin of coins) {
     if (!coin.visible) continue;
     coin.rotation.y += 0.05 * dt;
@@ -321,26 +336,23 @@ function animate(now = performance.now()) {
     }
   }
 
-  // The glider model banks into the turn but does not yaw independently:
-  // heading controls the flight direction; visual banking is secondary.
-  const targetRoll = THREE.MathUtils.clamp(-turnRate * 22, -0.42, 0.42);
-  const targetPitch = THREE.MathUtils.clamp(verticalSpeed * 3.0, -0.5, 0.5);
+  // Visual orientation follows the actual 3D flight vector.
   glider.rotation.y = heading;
-  glider.rotation.z += (targetRoll - glider.rotation.z) * 0.08 * dt;
-  glider.rotation.x += (targetPitch - glider.rotation.x) * 0.08 * dt;
+  glider.rotation.x = -pitch;
+  const targetRoll = THREE.MathUtils.clamp(-yawVelocity * 7.5, -0.38, 0.38);
+  glider.rotation.z += (targetRoll - glider.rotation.z) * yawResponse * dt;
 
-  // Chase camera follows heading rather than the original world axis.
   desiredCamera.set(
-    glider.position.x - Math.sin(heading) * 12,
-    glider.position.y + 5,
-    glider.position.z + Math.cos(heading) * 12
+    glider.position.x - Math.sin(heading) * 13,
+    glider.position.y + 5.5,
+    glider.position.z + Math.cos(heading) * 13
   );
   camera.position.lerp(desiredCamera, 0.075 * dt);
 
   lookTarget.set(
-    glider.position.x + Math.sin(heading) * 10,
-    glider.position.y + verticalSpeed * 8,
-    glider.position.z - Math.cos(heading) * 10
+    glider.position.x + tempForward.x * 14,
+    glider.position.y + tempForward.y * 14,
+    glider.position.z + tempForward.z * 14
   );
   camera.lookAt(lookTarget);
 
