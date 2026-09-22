@@ -4,10 +4,14 @@ document.body.style.margin = '0';
 document.body.style.overflow = 'hidden';
 document.body.style.background = '#8fc5e8';
 
+const WORLD_SIZE = 240;
+const CITY_EXTENT = 105;
+const BOUNDARY = WORLD_SIZE / 2 - 8;
+
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8fc5e8);
 
-const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 500);
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 700);
 camera.position.set(0, 8, 16);
 
 const renderer = new THREE.WebGLRenderer({ antialias: false });
@@ -19,32 +23,40 @@ Object.assign(renderer.domElement.style, {
 });
 document.body.appendChild(renderer.domElement);
 
-// Ground
+// Large test world.
 const ground = new THREE.Mesh(
-  new THREE.BoxGeometry(80, 1, 80),
+  new THREE.BoxGeometry(WORLD_SIZE, 1, WORLD_SIZE),
   new THREE.MeshBasicMaterial({ color: 0x4f9d55 })
 );
 ground.position.y = -1;
 scene.add(ground);
 
-// City blockout
+// Larger low-cost city blockout.
 const buildingMaterial = new THREE.MeshBasicMaterial({ color: 0xd8d8d8 });
 const darkBuildingMaterial = new THREE.MeshBasicMaterial({ color: 0x9b9b9b });
 
-for (let x = -30; x <= 30; x += 10) {
-  for (let z = -30; z <= 30; z += 10) {
-    if (Math.abs(x) < 11 && Math.abs(z) < 11) continue;
-    const height = 3 + (Math.abs(x * 7 + z * 13) % 9);
+for (let x = -CITY_EXTENT; x <= CITY_EXTENT; x += 12) {
+  for (let z = -CITY_EXTENT; z <= CITY_EXTENT; z += 12) {
+    // Leave broad streets between blocks.
+    if (Math.abs(x % 24) < 4 || Math.abs(z % 24) < 4) continue;
+
+    // Keep the immediate starting area open.
+    if (Math.abs(x) < 15 && Math.abs(z) < 15) continue;
+
+    const seed = Math.abs(x * 17 + z * 31);
+    const height = 3 + (seed % 14);
+
     const building = new THREE.Mesh(
-      new THREE.BoxGeometry(6, height, 6),
-      (x + z) % 20 === 0 ? darkBuildingMaterial : buildingMaterial
+      new THREE.BoxGeometry(7, height, 7),
+      seed % 5 === 0 ? darkBuildingMaterial : buildingMaterial
     );
+
     building.position.set(x, height / 2 - 0.5, z);
     scene.add(building);
   }
 }
 
-// Glider
+// Glider.
 const glider = new THREE.Group();
 
 const body = new THREE.Mesh(
@@ -60,10 +72,10 @@ const wing = new THREE.Mesh(
 );
 glider.add(wing);
 
-glider.position.set(0, 7, 4);
+glider.position.set(0, 7, 20);
 scene.add(glider);
 
-// HUD
+// HUD.
 const hud = document.createElement('div');
 Object.assign(hud.style, {
   position: 'fixed', left: '16px', top: '16px', zIndex: '10',
@@ -73,7 +85,7 @@ Object.assign(hud.style, {
 hud.innerHTML = 'CITY GLIDER<br><span style="font-size:13px;font-weight:normal">ARROWS: STEER / CLIMB / DIVE</span>';
 document.body.appendChild(hud);
 
-// Keyboard
+// Keyboard.
 const keys = {
   ArrowLeft: false, ArrowRight: false, ArrowUp: false, ArrowDown: false
 };
@@ -92,8 +104,7 @@ addEventListener('keyup', (event) => {
   }
 });
 
-// Simple flight physics.
-// Position is velocity-driven rather than directly moved by the keys.
+// Same prototype flight physics as the previous test.
 const velocity = new THREE.Vector3(0, -0.015, -0.22);
 
 const maxSpeed = 0.42;
@@ -113,38 +124,29 @@ function animate(now = performance.now()) {
   const dt = Math.min((now - previousTime) / 16.667, 2);
   previousTime = now;
 
-  // Steering changes velocity, creating momentum.
   if (keys.ArrowLeft) velocity.x -= steeringAcceleration * dt;
   if (keys.ArrowRight) velocity.x += steeringAcceleration * dt;
 
-  // Vertical input changes vertical velocity rather than position.
   if (keys.ArrowUp) velocity.y += climbAcceleration * dt;
   if (keys.ArrowDown) velocity.y -= diveAcceleration * dt;
 
-  // Gravity.
   velocity.y += gravity * dt;
 
-  // Forward speed is affected by diving/climbing.
   if (keys.ArrowDown) velocity.z -= 0.006 * dt;
   if (keys.ArrowUp) velocity.z += 0.003 * dt;
 
-  // Lift increases with forward speed.
   const speed = Math.max(0, -velocity.z);
   velocity.y += Math.max(0, speed - minSpeed) * liftStrength * dt;
 
-  // Mild drag.
   velocity.x *= Math.pow(drag, dt);
   velocity.y *= Math.pow(drag, dt);
 
-  // Keep forward speed within a useful range.
   velocity.z = Math.max(-maxSpeed, Math.min(-minSpeed, velocity.z));
 
-  // Apply velocity.
   glider.position.x += velocity.x * dt;
   glider.position.y += velocity.y * dt;
   glider.position.z += velocity.z * dt;
 
-  // Soft altitude limits for this prototype.
   if (glider.position.y < 0.5) {
     glider.position.y = 0.5;
     velocity.y = Math.max(0.025, velocity.y * -0.15);
@@ -154,23 +156,30 @@ function animate(now = performance.now()) {
     velocity.y = Math.min(-0.01, velocity.y * 0.2);
   }
 
-  // Gentle horizontal bounds.
-  if (glider.position.x < -35) {
-    glider.position.x = -35;
+  // Large-world boundary, far outside normal test flight.
+  if (glider.position.x < -BOUNDARY) {
+    glider.position.x = -BOUNDARY;
     velocity.x = Math.abs(velocity.x) * 0.25;
   }
-  if (glider.position.x > 35) {
-    glider.position.x = 35;
+  if (glider.position.x > BOUNDARY) {
+    glider.position.x = BOUNDARY;
     velocity.x = -Math.abs(velocity.x) * 0.25;
   }
+  if (glider.position.z < -BOUNDARY) {
+    glider.position.z = -BOUNDARY;
+    velocity.z = Math.min(-minSpeed, velocity.z * 0.25);
+  }
+  if (glider.position.z > BOUNDARY) {
+    glider.position.z = BOUNDARY;
+    velocity.z = -Math.max(minSpeed, Math.abs(velocity.z) * 0.25);
+  }
 
-  // Visual attitude: bank into horizontal movement and pitch with vertical velocity.
   const targetRoll = THREE.MathUtils.clamp(-velocity.x * 2.4, -0.65, 0.65);
   const targetPitch = THREE.MathUtils.clamp(velocity.y * 1.8, -0.45, 0.45);
+
   glider.rotation.z += (targetRoll - glider.rotation.z) * 0.10 * dt;
   glider.rotation.x += (targetPitch - glider.rotation.x) * 0.10 * dt;
 
-  // Smooth camera follow.
   const desiredCamera = new THREE.Vector3(
     glider.position.x,
     glider.position.y + 4.5,
