@@ -34,31 +34,8 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
-const map = new maplibregl.Map({
-  container: 'map',
-  style: 'https://tiles.openfreemap.org/styles/bright',
-  center: [SYDNEY.lon, SYDNEY.lat],
-  zoom: 14.5,
-  pitch: 68,
-  bearing: 0,
-  maxPitch: 85,
-  centerClampedToGround: false,
-  antialias: true,
-  attributionControl: true,
-  interactive: false,
-});
-
-const miniMap = new maplibregl.Map({
-  container: 'miniMap',
-  style: 'https://tiles.openfreemap.org/styles/bright',
-  center: [SYDNEY.lon, SYDNEY.lat],
-  zoom: 12.5,
-  pitch: 0,
-  bearing: 0,
-  maxPitch: 0,
-  interactive: false,
-  attributionControl: false,
-});
+let map: maplibregl.Map;
+let miniMap: maplibregl.Map | null = null;
 
 const hud = document.getElementById('hud')!;
 const compass = document.getElementById('compass')!;
@@ -79,6 +56,8 @@ let speed = 58;
 let distance = 0;
 let crashed = false;
 let mapReady = false;
+let miniMapReady = false;
+let startupFailed = false;
 
 const position = { x: 0, y: 0 };
 const velocity = { x: 0, y: -58, z: -6 };
@@ -103,11 +82,13 @@ function cameraUpdate() {
   options.bearing = heading * 180 / Math.PI;
   options.pitch = Math.max(42, Math.min(82, 58 - pitch * 18));
   map.jumpTo(options);
-  miniMap.jumpTo({
-    center: coord(position.x, position.y),
-    bearing: heading * 180 / Math.PI,
-    zoom: altitude > 700 ? 12.2 : altitude > 250 ? 13.1 : 14.1,
-  });
+  if (miniMap && miniMapReady) {
+    miniMap.jumpTo({
+      center: coord(position.x, position.y),
+      bearing: heading * 180 / Math.PI,
+      zoom: altitude > 700 ? 12.2 : altitude > 250 ? 13.1 : 14.1,
+    });
+  }
 }
 
 function updateFlight(dt:number) {
@@ -230,56 +211,114 @@ function addBuildingLayer() {
 
 let mapLoadFailed = false;
 
-map.on('load', () => {
-  // The base map is playable even if the optional custom 3D building layer fails.
+function showStartupError(title: string, detail: string) {
+  startupFailed = true;
+  mapReady = false;
+  message.style.display = 'block';
+  message.innerHTML = '<b>' + title + '</b><small>' + detail + '</small>';
+}
+
+function beginGame() {
+  if (mapReady || startupFailed) return;
   mapReady = true;
+  message.style.display = 'block';
   message.innerHTML = '<b>SYDNEY READY</b><small>Arrow keys / WASD to fly</small>';
 
+  // The base style is the critical path. 3D building enhancement is optional.
   try {
     addBuildingLayer();
   } catch (error) {
-    console.warn('Optional 3D building layer failed to load:', error);
+    console.warn('Optional 3D building layer failed:', error);
   }
-
-  setTimeout(() => {
-    if (!crashed && !mapLoadFailed) message.style.display = 'none';
-  }, 1200);
 
   try {
     cameraUpdate();
   } catch (error) {
     console.warn('Initial camera positioning failed:', error);
   }
-});
 
-map.on('error', e => {
-  console.warn('Map error', e);
-  if (!mapReady) {
-    mapLoadFailed = true;
-    message.style.display = 'block';
-    message.innerHTML =
-      '<b>SYDNEY MAP IS TAKING TOO LONG</b>' +
-      '<small>Check your connection, then refresh. The game will not stay stuck silently.</small>';
-  }
-});
+  setTimeout(() => {
+    if (!crashed && !startupFailed) message.style.display = 'none';
+  }, 900);
+}
 
-// Never leave the player on an unexplained infinite loading screen.
+try {
+  map = new maplibregl.Map({
+    container: 'map',
+    style: 'https://tiles.openfreemap.org/styles/bright',
+    center: [SYDNEY.lon, SYDNEY.lat],
+    zoom: 14.5,
+    pitch: 68,
+    bearing: 0,
+    maxPitch: 85,
+    centerClampedToGround: false,
+    antialias: false,
+    attributionControl: true,
+    interactive: false,
+  });
+
+  // style.load is intentionally used as the playable readiness signal.
+  // MapLibre's full load event waits for all necessary resources and can be
+  // delayed by individual tile/resource failures. The style itself is enough
+  // to make the flight loop responsive.
+  map.once('style.load', beginGame);
+
+  map.on('error', e => {
+    console.warn('MapLibre error:', e.error || e);
+    if (!mapReady && !startupFailed && map.isStyleLoaded()) beginGame();
+  });
+
+  map.on('webglcontextlost', () => {
+    showStartupError('GRAPHICS CONTEXT LOST', 'Refresh the page to restart the 3D map.');
+  });
+
+  map.on('webglcontextrestored', () => {
+    if (!startupFailed) beginGame();
+  });
+
+  miniMap = new maplibregl.Map({
+    container: 'miniMap',
+    style: 'https://tiles.openfreemap.org/styles/bright',
+    center: [SYDNEY.lon, SYDNEY.lat],
+    zoom: 12.5,
+    pitch: 0,
+    bearing: 0,
+    maxPitch: 0,
+    interactive: false,
+    attributionControl: false,
+  });
+
+  miniMap.once('style.load', () => {
+    miniMapReady = true;
+  });
+
+  miniMap.on('error', e => {
+    // The minimap is decorative. Never let a minimap failure block gameplay.
+    console.warn('Minimap error:', e.error || e);
+  });
+} catch (error) {
+  const detail = error instanceof Error ? error.message : String(error);
+  console.error('City Glider startup error:', error);
+  showStartupError('SYDNEY MAP COULD NOT START', detail);
+}
+
+// Hard fallback: no permanent loading screen, even if the map provider or
+// browser graphics stack never emits a useful event.
 setTimeout(() => {
-  if (!mapReady) {
-    mapLoadFailed = true;
-    message.style.display = 'block';
-    message.innerHTML =
-      '<b>SYDNEY MAP FAILED TO LOAD</b>' +
-      '<small>OpenFreeMap did not respond. Refresh to retry.</small>';
+  if (!mapReady && !startupFailed) {
+    showStartupError(
+      'SYDNEY MAP FAILED TO START',
+      'The map service did not become ready. Refresh to retry.'
+    );
   }
-}, 12000);
+}, 10000);
 
 let last = performance.now();
 function frame(now:number) {
   requestAnimationFrame(frame);
   const dt = Math.min((now - last) / 1000, 0.033);
   last = now;
-  if (!mapReady) return;
+  if (!mapReady || startupFailed) return;
 
   if (crashed) {
     if (keys.has('Space')) {
