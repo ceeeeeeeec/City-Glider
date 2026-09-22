@@ -4,16 +4,16 @@ document.body.style.margin = '0';
 document.body.style.overflow = 'hidden';
 document.body.style.background = '#8fc5e8';
 
-const WORLD_SIZE = 2400;
+const WORLD_SIZE = 10000;
 const CITY_EXTENT = 180;
 const BOUNDARY = WORLD_SIZE / 2 - 10;
 const COIN_COUNT = 28;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x8fc5e8);
-scene.fog = new THREE.Fog(0x8fc5e8, 120, 950);
+scene.fog = new THREE.Fog(0x8fc5e8, 250, 2400);
 
-const camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 700);
+const camera = new THREE.PerspectiveCamera(64, innerWidth / innerHeight, 0.1, 3500);
 camera.position.set(0, 10, 18);
 
 const renderer = new THREE.WebGLRenderer({ antialias: false });
@@ -28,13 +28,18 @@ document.body.appendChild(renderer.domElement);
 // ---------- WORLD ----------
 const ground = new THREE.Mesh(
   new THREE.BoxGeometry(WORLD_SIZE, 1, WORLD_SIZE),
-  new THREE.MeshBasicMaterial({ color: 0x4f9d55 })
+  new THREE.MeshLambertMaterial({ color: 0x5f9f62 })
 );
 ground.position.y = -1;
 scene.add(ground);
 
-const buildingMaterial = new THREE.MeshBasicMaterial({ color: 0xd8d8d8 });
-const darkBuildingMaterial = new THREE.MeshBasicMaterial({ color: 0x9b9b9b });
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0x496b4f, 1.35);
+scene.add(hemiLight);
+const sunLight = new THREE.DirectionalLight(0xffffff, 1.6);
+sunLight.position.set(-300, 700, 250);
+scene.add(sunLight);
+const buildingMaterial = new THREE.MeshLambertMaterial({ color: 0xc8c6c0 });
+const darkBuildingMaterial = new THREE.MeshLambertMaterial({ color: 0x74787b });
 
 const buildings: THREE.Mesh[] = [];
 
@@ -43,7 +48,7 @@ const buildings: THREE.Mesh[] = [];
 // temporary procedural blocks. This is the first real-city rendering pass.
 const SYDNEY_LAT = -33.8688;
 const SYDNEY_LON = 151.2093;
-const CITY_RADIUS_M = 3500;
+const CITY_RADIUS_M = 5000;
 
 function lonToX(lon: number) {
   return (lon - SYDNEY_LON) * 111320 * Math.cos(SYDNEY_LAT * Math.PI / 180);
@@ -78,7 +83,10 @@ function addOSMBuilding(points: Array<{lat: number; lon: number}>, height: numbe
 
   const material = height > 45 ? darkBuildingMaterial : buildingMaterial;
   const building = new THREE.Mesh(geometry, material);
-  building.userData.width = 6;
+  const xs = points.map(p => lonToX(p.lon));
+  const zs = points.map(p => latToZ(p.lat));
+  building.userData.width = Math.max(...xs) - Math.min(...xs);
+  building.userData.depth = Math.max(...zs) - Math.min(...zs);
   building.userData.height = depth;
   building.userData.osm = true;
 
@@ -113,7 +121,7 @@ async function loadSydneyBuildings() {
         const bx = b.geometry.reduce((s: number, p: any) => s + lonToX(p.lon), 0) / b.geometry.length;
         return (ax * ax + ay * ay) - (bx * bx + by * by);
       })
-      .slice(0, 6500);
+      .slice(0, 8500);
 
     for (const el of elements) {
       const tags = el.tags ?? {};
@@ -200,7 +208,7 @@ const wing = new THREE.Mesh(
 );
 glider.add(wing);
 
-glider.position.set(0, 18, 155);
+glider.position.set(0, 500, 155);
 scene.add(glider);
 
 // ---------- COIN ROUTE ----------
@@ -247,6 +255,7 @@ function updateHud() {
     '</span><br>' +
     '<span style="font-size:14px">COINS: ' + score + ' / ' + COIN_COUNT +
     ' &nbsp; ALTITUDE: ' + Math.max(0, Math.floor(glider.position.y)) + 'm' +
+    ' &nbsp; SPEED: ' + Math.round(speed * 3.6) + ' km/h' +
     ' &nbsp; DISTANCE: ' + Math.floor(distance) + 'm</span>' +
     (crashed
       ? '<br><span style="font-size:16px">CRASHED — press SPACE to restart</span>'
@@ -282,36 +291,39 @@ addEventListener('keyup', (event) => {
 });
 
 // ---------- FLIGHT ----------
-let speed = 0.42;
-let verticalSpeed = 0;
+// ---------- FLIGHT ----------
+// Velocity-vector wingsuit model: dive to convert altitude into speed, then
+// use that stored momentum to carve a pull-up. This targets the arcade
+// wingsuit feel associated with Just Cause 3 rather than a conventional
+// aircraft model. citeturn0search3turn0search9
 let heading = 0;
 let pitch = 0;
+let speed = 55;
+let crashed = false;
+let crashTimer = 0;
 
-const minSpeed = 0.28;
-const maxSpeed = 0.78;
+const velocity = new THREE.Vector3(0, -5, -55);
+const desiredForward = new THREE.Vector3();
+const velocityDirection = new THREE.Vector3();
 
-// Arcade wingsuit/glider model inspired by the feel of Just Cause 3:
-// strong forward momentum, easy diving, gentle climbing, responsive yaw,
-// and enough pitch authority to carry through the zenith into a loop.
-const gravity = 0.0017;
-const liftStrength = 0.0065;
-const turnRate = 0.028;
-const yawResponse = 0.14;
-const climbPitchRate = 0.006;
-const divePitchRate = 0.014;
-const pitchReturn = 0.985;
-const startPosition = new THREE.Vector3(0, 1000, 155);
-
-let yawVelocity = 0;
+const minSpeed = 8;
+const maxSpeed = 95;
+const gravity = 24;
+const diveAcceleration = 20;
+const drag = 0.0025;
+const steeringRate = 1.65;
+const pitchUpRate = 1.35;
+const pitchDownRate = 2.15;
+const velocityAlignment = 2.8;
+const startPosition = new THREE.Vector3(0, 500, 155);
 
 function resetRun() {
   glider.position.copy(startPosition);
   glider.rotation.set(0, 0, 0);
-  speed = 0.42;
-  verticalSpeed = 0;
   heading = 0;
   pitch = 0;
-  yawVelocity = 0;
+  velocity.set(0, -5, -55);
+  speed = velocity.length();
   cameraHeading = 0;
   desiredCamera.copy(startPosition);
   smoothedLookTarget.copy(startPosition);
@@ -319,20 +331,14 @@ function resetRun() {
   distance = 0;
   crashed = false;
   crashTimer = 0;
-
   coins.forEach((coin, index) => {
     const t = index / (COIN_COUNT - 1);
     const angle = t * Math.PI * 2.25;
     const radius = 34 + t * 70;
-    coin.position.set(
-      Math.sin(angle) * radius,
-      8 + Math.sin(t * Math.PI * 4) * 4,
-      110 - t * 205 + Math.cos(angle) * 18
-    );
+    coin.position.set(Math.sin(angle) * radius, 8 + Math.sin(t * Math.PI * 4) * 4, 110 - t * 205 + Math.cos(angle) * 18);
     coin.visible = true;
     coin.userData.collected = false;
   });
-
   updateHud();
 }
 
@@ -340,9 +346,57 @@ function crash() {
   if (crashed) return;
   crashed = true;
   crashTimer = 0;
+  velocity.set(0, 0, 0);
   speed = 0;
-  verticalSpeed = 0;
   updateHud();
+}
+
+function updateFlight(dt: number) {
+  if (keys.ArrowLeft) heading += steeringRate * dt;
+  if (keys.ArrowRight) heading -= steeringRate * dt;
+
+  if (keys.ArrowUp) pitch += pitchUpRate * dt;
+  if (keys.ArrowDown) pitch -= pitchDownRate * dt;
+  pitch = THREE.MathUtils.clamp(pitch, -Math.PI * 0.99, Math.PI * 0.99);
+
+  desiredForward.set(
+    Math.sin(heading) * Math.cos(pitch),
+    Math.sin(pitch),
+    -Math.cos(heading) * Math.cos(pitch)
+  ).normalize();
+
+  const currentSpeed = velocity.length();
+  velocityDirection.copy(velocity).normalize();
+
+  // Redirect, don't replace, the velocity vector. At high speed the player
+  // can pull through a large arc; at low speed there is not enough energy to
+  // simply point upward and fly like a powered aircraft.
+  const alignment = THREE.MathUtils.clamp(velocityAlignment * dt * (currentSpeed / 55), 0, 0.34);
+  velocityDirection.lerp(desiredForward, alignment).normalize();
+  velocity.copy(velocityDirection).multiplyScalar(currentSpeed);
+
+  velocity.y -= gravity * dt;
+  if (keys.ArrowDown) velocity.addScaledVector(desiredForward, diveAcceleration * dt);
+
+  const lift = Math.max(0, currentSpeed - 18) * 0.34;
+  velocity.y += lift * Math.max(0, desiredForward.y) * dt;
+
+  velocity.multiplyScalar(Math.max(0.90, 1 - drag * currentSpeed * dt));
+
+  const newSpeed = THREE.MathUtils.clamp(velocity.length(), minSpeed, maxSpeed);
+  velocity.normalize().multiplyScalar(newSpeed);
+  speed = newSpeed;
+
+  const oldPosition = glider.position.clone();
+  glider.position.addScaledVector(velocity, dt);
+  distance += oldPosition.distanceTo(glider.position);
+
+  glider.rotation.y = heading;
+  glider.rotation.x = -pitch;
+  const turnRoll = ((keys.ArrowLeft ? -1 : 0) + (keys.ArrowRight ? 1 : 0)) * 0.55 * Math.min(1, currentSpeed / 45);
+  glider.rotation.z += (turnRoll - glider.rotation.z) * Math.min(1, 6 * dt);
+
+  return currentSpeed;
 }
 
 const tempForward = new THREE.Vector3();
@@ -351,69 +405,51 @@ const lookTarget = new THREE.Vector3();
 const smoothedLookTarget = new THREE.Vector3();
 let cameraHeading = 0;
 
-let previousTime = performance.now();
+function updateCamera(dt: number, currentSpeed: number) {
+  tempForward.copy(velocity).normalize();
+  const speed01 = THREE.MathUtils.clamp((currentSpeed - minSpeed) / (maxSpeed - minSpeed), 0, 1);
+  const chaseDistance = THREE.MathUtils.lerp(13, 34, speed01);
+  const cameraHeight = THREE.MathUtils.lerp(5.5, 9.5, speed01);
+
+  let headingDelta = heading - cameraHeading;
+  headingDelta = Math.atan2(Math.sin(headingDelta), Math.cos(headingDelta));
+  cameraHeading += headingDelta * (1 - Math.pow(0.72, dt * 60));
+
+  desiredCamera.set(
+    glider.position.x - Math.sin(cameraHeading) * chaseDistance - tempForward.x * chaseDistance * 0.35,
+    glider.position.y + cameraHeight - tempForward.y * chaseDistance * 0.15,
+    glider.position.z + Math.cos(cameraHeading) * chaseDistance - tempForward.z * chaseDistance * 0.35
+  );
+  camera.position.lerp(desiredCamera, Math.min(1, 5 * dt));
+
+  lookTarget.set(
+    glider.position.x + tempForward.x * THREE.MathUtils.lerp(12, 35, speed01),
+    glider.position.y + tempForward.y * THREE.MathUtils.lerp(7, 18, speed01),
+    glider.position.z + tempForward.z * THREE.MathUtils.lerp(12, 35, speed01)
+  );
+  smoothedLookTarget.lerp(lookTarget, Math.min(1, 4 * dt));
+  camera.lookAt(smoothedLookTarget);
+
+  camera.fov = THREE.MathUtils.lerp(62, 78, speed01);
+  camera.updateProjectionMatrix();
+}
+
 
 function animate(now = performance.now()) {
   requestAnimationFrame(animate);
 
-  const dt = Math.min((now - previousTime) / 16.667, 2);
+  const dt = Math.min((now - previousTime) / 1000, 0.033);
   previousTime = now;
 
   if (crashed) {
     crashTimer += dt;
-    glider.rotation.z += 0.025 * dt;
-    // Freeze the glider at the collision point; don't let the crash animation
-    // move it into the sky/void and away from the object that caused the crash.
+    glider.rotation.z += 0.025 * (dt * 60);
     updateHud();
     renderer.render(scene, camera);
     return;
   }
 
-  // LEFT/RIGHT: direct, responsive yaw. Turning is deliberately independent
-  // of the forward speed so the glider remains manoeuvrable at speed.
-  if (keys.ArrowLeft) yawVelocity -= turnRate * dt;
-  if (keys.ArrowRight) yawVelocity += turnRate * dt;
-  yawVelocity *= Math.pow(0.82, dt);
-  yawVelocity = THREE.MathUtils.clamp(yawVelocity, -0.055, 0.055);
-  heading += yawVelocity * dt;
-
-  // UP/DOWN: pitch control. Diving is substantially stronger than climbing.
-  // Pitch is allowed to pass +/-90 degrees, so a pull-up can continue into
-  // a loop/flip at the zenith instead of hitting an artificial ceiling.
-  if (keys.ArrowUp) pitch += climbPitchRate * dt;
-  if (keys.ArrowDown) pitch -= divePitchRate * dt;
-
-  // Natural pitch damping, but retain momentum through a loop.
-  pitch *= Math.pow(pitchReturn, dt);
-
-  // Keep some gravity, but let the glider's orientation determine most of
-  // the vertical movement.
-  verticalSpeed -= gravity * dt;
-  verticalSpeed += Math.sin(pitch) * liftStrength * speed * dt;
-  verticalSpeed *= Math.pow(0.992, dt);
-
-  // Diving adds energy; climbing costs a little. This makes downward flight
-  // easy to initiate while preserving substantial forward momentum.
-  if (keys.ArrowDown) speed += 0.004 * dt;
-  if (keys.ArrowUp) speed -= 0.0012 * dt;
-  speed *= Math.pow(0.9985, dt);
-  speed = THREE.MathUtils.clamp(speed, minSpeed, maxSpeed);
-
-  // True 3D flight vector.
-  tempForward.set(
-    Math.sin(heading) * Math.cos(pitch),
-    Math.sin(pitch),
-    -Math.cos(heading) * Math.cos(pitch)
-  ).normalize();
-
-  const oldX = glider.position.x;
-  const oldZ = glider.position.z;
-
-  glider.position.x += tempForward.x * speed * dt;
-  glider.position.y += tempForward.y * speed * dt + verticalSpeed * dt;
-  glider.position.z += tempForward.z * speed * dt;
-
-  distance += Math.hypot(glider.position.x - oldX, glider.position.z - oldZ);
+  const currentSpeed = updateFlight(dt);
 
   if (glider.position.y <= 0.35) {
     glider.position.y = 0.35;
@@ -425,17 +461,15 @@ function animate(now = performance.now()) {
     crash();
   }
 
-  // Lightweight building collision.
   if (!crashed) {
-    const gliderPoint = glider.position;
+    const p = glider.position;
     for (const building of buildings) {
-      const dx = Math.abs(gliderPoint.x - building.position.x);
-      const dz = Math.abs(gliderPoint.z - building.position.z);
-      const halfX = (building.userData.width as number) * 0.5 + 1.0;
-      const halfZ = (building.userData.width as number) * 0.5 + 1.0;
-      const top = building.position.y + (building.userData.height as number) * 0.5;
-
-      if (dx < halfX && dz < halfZ && gliderPoint.y < top + 0.8) {
+      const dx = Math.abs(p.x - building.position.x);
+      const dz = Math.abs(p.z - building.position.z);
+      const halfX = Math.max(3, (building.userData.width as number) * 0.5) + 1;
+      const halfZ = Math.max(3, (building.userData.depth as number) * 0.5) + 1;
+      const top = building.userData.height as number;
+      if (dx < halfX && dz < halfZ && p.y < top + 0.8) {
         crash();
         break;
       }
@@ -444,9 +478,8 @@ function animate(now = performance.now()) {
 
   for (const coin of coins) {
     if (!coin.visible) continue;
-    coin.rotation.y += 0.05 * dt;
-    coin.rotation.x += 0.025 * dt;
-
+    coin.rotation.y += 0.05 * dt * 60;
+    coin.rotation.x += 0.025 * dt * 60;
     if (glider.position.distanceTo(coin.position) < 2.1) {
       coin.visible = false;
       coin.userData.collected = true;
@@ -454,39 +487,11 @@ function animate(now = performance.now()) {
     }
   }
 
-  // Visual orientation follows the actual 3D flight vector.
-  glider.rotation.y = heading;
-  glider.rotation.x = -pitch;
-  const targetRoll = THREE.MathUtils.clamp(-yawVelocity * 7.5, -0.38, 0.38);
-  glider.rotation.z += (targetRoll - glider.rotation.z) * yawResponse * dt;
-
-  // CAMERA: third-person chase, but intentionally NOT rigidly attached to the glider.
-  // The camera's horizontal follow heading lags behind the glider, so yaw turns
-  // sweep naturally instead of snapping the whole view around with the player.
-  let headingDelta = heading - cameraHeading;
-  headingDelta = Math.atan2(Math.sin(headingDelta), Math.cos(headingDelta));
-  cameraHeading += headingDelta * (1 - Math.pow(0.88, dt));
-
-  desiredCamera.set(
-    glider.position.x - Math.sin(cameraHeading) * 15,
-    glider.position.y + 6.5,
-    glider.position.z + Math.cos(cameraHeading) * 15
-  );
-  camera.position.lerp(desiredCamera, 0.055 * dt);
-
-  // Also smooth the point the camera looks toward. This prevents a hard pan when
-  // the glider changes direction, while still keeping the aircraft centred.
-  lookTarget.set(
-    glider.position.x + tempForward.x * 12,
-    glider.position.y + tempForward.y * 12,
-    glider.position.z + tempForward.z * 12
-  );
-  smoothedLookTarget.lerp(lookTarget, 0.075 * dt);
-  camera.lookAt(smoothedLookTarget);
-
+  updateCamera(dt, currentSpeed);
   updateHud();
   renderer.render(scene, camera);
 }
+
 
 animate();
 
