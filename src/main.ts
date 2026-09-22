@@ -5,7 +5,6 @@ document.body.style.overflow = 'hidden';
 document.body.style.background = '#8fc5e8';
 
 const WORLD_SIZE = 10000;
-const CITY_EXTENT = 180;
 const BOUNDARY = WORLD_SIZE / 2 - 10;
 const COIN_COUNT = 28;
 
@@ -61,8 +60,6 @@ function addLandmark(x: number, z: number, height: number, width: number) {
 // chunked GIS data for the final city.
 const SYDNEY_LAT = -33.8688;
 const SYDNEY_LON = 151.2093;
-const CITY_RADIUS_M = 5000;
-let cityLoaded = false;
 
 function createSydneyCity() {
   // Keep the whole prototype GPU-light: one shared box geometry + one
@@ -192,6 +189,126 @@ Object.assign(hud.style, {
 document.body.appendChild(hud);
 hud.style.display = 'none';
 
+// ---------- GTA-STYLE MINIMAP ----------
+// This first pass is a detailed, lightweight vector minimap. It deliberately
+// stays local/offline so gameplay never depends on a live map request. The
+// coordinates are aligned to the Sydney prototype and will later be replaced
+// by baked OSM/NSW GIS vectors. OSM contains roads, buildings, POIs and natural
+// features suitable for this next data pipeline. 
+const minimap = document.createElement('canvas');
+minimap.width = 260;
+minimap.height = 260;
+Object.assign(minimap.style, {
+  position: 'fixed', left: '18px', bottom: '18px', width: '260px', height: '260px',
+  zIndex: '11', borderRadius: '50%', border: '3px solid rgba(255,255,255,.9)',
+  boxShadow: '0 3px 14px rgba(0,0,0,.45)', pointerEvents: 'none', display: 'none'
+});
+document.body.appendChild(minimap);
+const mapCtx = minimap.getContext('2d')!;
+const MAP_SCALE = 0.075;
+
+const mapStreets: Array<{name:string; points:Array<[number,number]>; major?:boolean}> = [
+  {name:'George St', points:[[-120,100],[-75,20],[-35,-90],[10,-260],[70,-520]], major:true},
+  {name:'Pitt St', points:[[10,100],[28,15],[55,-80],[75,-210],[110,-430]]},
+  {name:'Macquarie St', points:[[115,80],[105,-10],[95,-100],[65,-185]], major:true},
+  {name:'Elizabeth St', points:[[-80,110],[-55,10],[-20,-95],[10,-210]], major:true},
+  {name:'Kent St', points:[[-190,60],[-160,-30],[-145,-130],[-120,-250]], major:true},
+  {name:'York St', points:[[-145,90],[-115,10],[-95,-80],[-70,-190]], major:true},
+  {name:'Castlereagh St', points:[[-20,80],[-5,5],[15,-75],[30,-160]],},
+  {name:'Wynyard', points:[[-190,-40],[-110,-50],[-30,-45],[45,-55],[120,-75]], major:true},
+  {name:'Bridge St', points:[[-110,55],[-30,45],[50,50],[125,20]], major:true},
+  {name:'Market St', points:[[-115,-145],[-35,-150],[45,-140],[125,-165]], major:true},
+  {name:'Park St', points:[[-125,-185],[-40,-190],[45,-185],[125,-205]]},
+  {name:'William St', points:[[85,115],[95,65],[130,15],[170,-20],[205,-40]], major:true},
+  {name:'Anzac Bridge', points:[[-720,230],[-500,180],[-300,120],[-170,40]] ,major:true},
+  {name:'Cahill Expressway', points:[[-50,160],[30,125],[105,120],[190,95]], major:true},
+  {name:'Darling Harbour', points:[[-260,-120],[-220,-30],[-190,60],[-150,135]]}
+];
+
+const mapSuburbs: Array<{name:string;x:number;z:number}> = [
+  {name:'THE ROCKS',x:-20,z:115},{name:'CIRCULAR QUAY',x:65,z:100},{name:'CBD',x:0,z:-55},
+  {name:'BARANGAROO',x:-150,z:-5},{name:'PYRMONT',x:-360,z:-90},{name:'DARLING HARBOUR',x:-220,z:-150},
+  {name:'WOOLLOOMOOLOO',x:230,z:95},{name:'POTTS POINT',x:350,z:120},{name:'KIRRIBILLI',x:170,z:300},
+  {name:'NORTH SYDNEY',x:280,z:560},{name:'ULTIMO',x:-300,z:-250},{name:'SURRY HILLS',x:210,z:-260}
+];
+
+function drawMapShape(points:Array<[number,number]>, fill:string, stroke?:string) {
+  if (!points.length) return;
+  mapCtx.beginPath();
+  points.forEach(([x,z], i) => {
+    const px = 130 + x * MAP_SCALE;
+    const py = 130 - z * MAP_SCALE;
+    if (i === 0) mapCtx.moveTo(px, py); else mapCtx.lineTo(px, py);
+  });
+  mapCtx.closePath();
+  mapCtx.fillStyle = fill; mapCtx.fill();
+  if (stroke) { mapCtx.strokeStyle = stroke; mapCtx.stroke(); }
+}
+
+function drawMinimap() {
+  const cx = 130, cy = 130;
+  mapCtx.clearRect(0, 0, 260, 260);
+  mapCtx.save();
+  mapCtx.beginPath(); mapCtx.arc(cx, cy, 127, 0, Math.PI * 2); mapCtx.clip();
+  mapCtx.translate(cx, cy);
+  mapCtx.rotate(-heading);
+  mapCtx.translate(-glider.position.x * MAP_SCALE, glider.position.z * MAP_SCALE);
+
+  // Water/harbour silhouette.
+  mapCtx.fillStyle = '#3f91b6';
+  mapCtx.fillRect(-2500 * MAP_SCALE, -2500 * MAP_SCALE, 5000 * MAP_SCALE, 5000 * MAP_SCALE);
+  drawMapShape([[-1200,900],[-750,620],[-500,380],[-360,230],[-250,150],[-150,130],[-50,170],[80,130],[210,190],[370,330],[650,500],[1000,700],[1200,1100],[1200,1600],[-1200,1600]], '#78b99c');
+  drawMapShape([[-950,-500],[-650,-350],[-420,-260],[-260,-170],[-180,-80],[-120,80],[-40,160],[100,150],[220,70],[340,-20],[520,-120],[800,-200],[1100,-300],[1200,-700],[1200,-1200],[-950,-1200]], '#78b99c');
+
+  // Blocks/building mass: fine polygons at the central scale.
+  for (let x=-650; x<=650; x+=48) for (let z=-520; z<=520; z+=48) {
+    const d=Math.hypot(x,z); if(d>850) continue;
+    const roadX=Math.abs(((x+24)%190)-95)<12;
+    const roadZ=Math.abs(((z+24)%220)-110)<12;
+    if(roadX||roadZ) continue;
+    mapCtx.fillStyle = d<300 ? '#a7a9aa' : '#969a9b';
+    mapCtx.fillRect(x*MAP_SCALE-11,z*MAP_SCALE-11,22,22);
+  }
+
+  // Streets.
+  mapStreets.forEach(street => {
+    mapCtx.beginPath();
+    street.points.forEach(([x,z],i)=>{
+      const px=x*MAP_SCALE, py=z*MAP_SCALE;
+      if(i===0) mapCtx.moveTo(px,py); else mapCtx.lineTo(px,py);
+    });
+    mapCtx.strokeStyle = street.major ? '#f4f4f4' : '#d7d7d7';
+    mapCtx.lineWidth = street.major ? 3 : 1.5;
+    mapCtx.stroke();
+  });
+
+  // Recognisable landmark silhouettes.
+  // Opera House: five white shell-like triangles/fans near Circular Quay.
+  const ox=65*MAP_SCALE, oz=100*MAP_SCALE;
+  mapCtx.fillStyle='#ffffff';
+  for(let i=0;i<5;i++){ mapCtx.beginPath(); mapCtx.moveTo(ox+i*2-5,oz+4); mapCtx.lineTo(ox+i*2,oz-9-Math.abs(i-2)*1.5); mapCtx.lineTo(ox+i*2+5,oz+4); mapCtx.closePath(); mapCtx.fill(); }
+  // Harbour Bridge: broad arch.
+  mapCtx.strokeStyle='#555'; mapCtx.lineWidth=5; mapCtx.beginPath();
+  mapCtx.moveTo(-25*MAP_SCALE,120*MAP_SCALE); mapCtx.quadraticCurveTo(80*MAP_SCALE,275*MAP_SCALE,190*MAP_SCALE,185*MAP_SCALE); mapCtx.stroke();
+  mapCtx.strokeStyle='#777'; mapCtx.lineWidth=2; mapCtx.beginPath();
+  mapCtx.moveTo(-25*MAP_SCALE,120*MAP_SCALE); mapCtx.lineTo(190*MAP_SCALE,185*MAP_SCALE); mapCtx.stroke();
+
+  // Player marker remains fixed at centre.
+  mapCtx.restore();
+  mapCtx.save();
+  mapCtx.translate(cx,cy);
+  mapCtx.fillStyle='#e83b32'; mapCtx.beginPath(); mapCtx.moveTo(0,-11); mapCtx.lineTo(7,9); mapCtx.lineTo(0,5); mapCtx.lineTo(-7,9); mapCtx.closePath(); mapCtx.fill();
+  mapCtx.strokeStyle='#fff'; mapCtx.lineWidth=2; mapCtx.stroke();
+  mapCtx.restore();
+
+  // Compass ring / cardinal directions.
+  mapCtx.fillStyle='#fff'; mapCtx.font='bold 12px system-ui'; mapCtx.textAlign='center';
+  mapCtx.fillText('N',130,16); mapCtx.fillText('E',244,134); mapCtx.fillText('S',130,250); mapCtx.fillText('W',16,134);
+  mapCtx.font='bold 10px system-ui'; mapCtx.fillStyle='rgba(255,255,255,.75)';
+  mapCtx.fillText('SYDNEY',130,236);
+}
+
+
 // ---------- HOME / LOADING ----------
 const home = document.createElement('div');
 Object.assign(home.style, {
@@ -232,6 +349,8 @@ function updateHud() {
 }
 updateHud();
 
+drawMinimap();
+
 function startGame() {
   if (gameStarted) return;
   gameStarted = true;
@@ -245,9 +364,9 @@ function startGame() {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       createSydneyCity();
-      cityLoaded = true;
       cityLabel.textContent = 'SYDNEY • LIGHTWEIGHT CITY';
       hud.style.display = 'block';
+      minimap.style.display = 'block';
       home.remove();
       resetRun();
       previousTime = performance.now();
@@ -343,12 +462,12 @@ function crash() {
 }
 
 function updateFlight(dt: number) {
-  if (keys.ArrowLeft) heading += steeringRate * dt;
-  if (keys.ArrowRight) heading -= steeringRate * dt;
+  if (keys.ArrowLeft) heading -= steeringRate * dt;
+  if (keys.ArrowRight) heading += steeringRate * dt;
 
   if (keys.ArrowUp) pitch += pitchUpRate * dt;
   if (keys.ArrowDown) pitch -= pitchDownRate * dt;
-  pitch = THREE.MathUtils.clamp(pitch, -Math.PI * 0.99, Math.PI * 0.99);
+  pitch = THREE.MathUtils.clamp(pitch, -Math.PI * 0.49, Math.PI * 0.22);
 
   desiredForward.set(
     Math.sin(heading) * Math.cos(pitch),
@@ -359,9 +478,8 @@ function updateFlight(dt: number) {
   const currentSpeed = velocity.length();
   velocityDirection.copy(velocity).normalize();
 
-  // Redirect, don't replace, the velocity vector. At high speed the player
-  // can pull through a large arc; at low speed there is not enough energy to
-  // simply point upward and fly like a powered aircraft.
+  // Redirect the velocity for simple arcade gliding. Upward looping/pull-up
+  // mechanics are intentionally disabled for this prototype.
   const alignment = THREE.MathUtils.clamp(velocityAlignment * dt * (currentSpeed / 55), 0, 0.34);
   velocityDirection.lerp(desiredForward, alignment).normalize();
   velocity.copy(velocityDirection).multiplyScalar(currentSpeed);
@@ -369,11 +487,10 @@ function updateFlight(dt: number) {
   velocity.y -= gravity * dt;
   if (keys.ArrowDown) velocity.addScaledVector(desiredForward, diveAcceleration * dt);
 
-  const lift = Math.max(0, currentSpeed - 18) * 0.34;
-  velocity.y += lift * Math.max(0, desiredForward.y) * dt;
-
   velocity.multiplyScalar(Math.max(0.90, 1 - drag * currentSpeed * dt));
 
+  // Never generate upward velocity in this prototype.
+  if (velocity.y > 0) velocity.y = 0;
   const newSpeed = THREE.MathUtils.clamp(velocity.length(), minSpeed, maxSpeed);
   velocity.normalize().multiplyScalar(newSpeed);
   speed = newSpeed;
@@ -484,6 +601,7 @@ function animate(now = performance.now()) {
   }
 
   updateCamera(dt, currentSpeed);
+  drawMinimap();
   updateHud();
   renderer.render(scene, camera);
 }
