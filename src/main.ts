@@ -37,10 +37,7 @@ const darkBuildingMaterial = new THREE.MeshBasicMaterial({ color: 0x9b9b9b });
 
 for (let x = -CITY_EXTENT; x <= CITY_EXTENT; x += 12) {
   for (let z = -CITY_EXTENT; z <= CITY_EXTENT; z += 12) {
-    // Leave broad streets between blocks.
     if (Math.abs(x % 24) < 4 || Math.abs(z % 24) < 4) continue;
-
-    // Keep the immediate starting area open.
     if (Math.abs(x) < 15 && Math.abs(z) < 15) continue;
 
     const seed = Math.abs(x * 17 + z * 31);
@@ -50,7 +47,6 @@ for (let x = -CITY_EXTENT; x <= CITY_EXTENT; x += 12) {
       new THREE.BoxGeometry(7, height, 7),
       seed % 5 === 0 ? darkBuildingMaterial : buildingMaterial
     );
-
     building.position.set(x, height / 2 - 0.5, z);
     scene.add(building);
   }
@@ -104,17 +100,22 @@ addEventListener('keyup', (event) => {
   }
 });
 
-// Same prototype flight physics as the previous test.
-const velocity = new THREE.Vector3(0, -0.015, -0.22);
+// Flight model: the glider now has a heading, so it can turn through 360 degrees.
+let speed = 0.22;
+let verticalSpeed = -0.015;
+let heading = 0; // radians; zero means forward along -Z
+let turnRate = 0;
 
-const maxSpeed = 0.42;
 const minSpeed = 0.08;
-const gravity = -0.004;
-const liftStrength = 0.006;
-const steeringAcceleration = 0.009;
+const maxSpeed = 0.42;
+const gravity = 0.004;
+const liftStrength = 0.020;
+const turnAcceleration = 0.012;
+const turnDrag = 0.90;
+const maxTurnRate = 0.055;
 const climbAcceleration = 0.006;
 const diveAcceleration = 0.005;
-const drag = 0.985;
+const speedDrag = 0.997;
 
 let previousTime = performance.now();
 
@@ -124,73 +125,91 @@ function animate(now = performance.now()) {
   const dt = Math.min((now - previousTime) / 16.667, 2);
   previousTime = now;
 
-  if (keys.ArrowLeft) velocity.x -= steeringAcceleration * dt;
-  if (keys.ArrowRight) velocity.x += steeringAcceleration * dt;
+  // Left/right changes heading. Holding a direction continues the turn,
+  // rather than pushing the glider sideways against a fixed world axis.
+  if (keys.ArrowLeft) turnRate += turnAcceleration * dt;
+  if (keys.ArrowRight) turnRate -= turnAcceleration * dt;
+  turnRate *= Math.pow(turnDrag, dt);
+  turnRate = THREE.MathUtils.clamp(turnRate, -maxTurnRate, maxTurnRate);
+  heading += turnRate * dt;
 
-  if (keys.ArrowUp) velocity.y += climbAcceleration * dt;
-  if (keys.ArrowDown) velocity.y -= diveAcceleration * dt;
+  // Up/down controls climb and dive momentum.
+  if (keys.ArrowUp) verticalSpeed += climbAcceleration * dt;
+  if (keys.ArrowDown) verticalSpeed -= diveAcceleration * dt;
 
-  velocity.y += gravity * dt;
+  // Gravity and lift.
+  verticalSpeed -= gravity * dt;
+  verticalSpeed += Math.max(0, speed - minSpeed) * liftStrength * dt;
+  verticalSpeed *= Math.pow(0.985, dt);
 
-  if (keys.ArrowDown) velocity.z -= 0.006 * dt;
-  if (keys.ArrowUp) velocity.z += 0.003 * dt;
+  // Diving builds speed; climbing costs some speed.
+  if (keys.ArrowDown) speed += 0.006 * dt;
+  if (keys.ArrowUp) speed -= 0.003 * dt;
+  speed *= Math.pow(speedDrag, dt);
+  speed = THREE.MathUtils.clamp(speed, minSpeed, maxSpeed);
 
-  const speed = Math.max(0, -velocity.z);
-  velocity.y += Math.max(0, speed - minSpeed) * liftStrength * dt;
+  // Move in the direction the glider is actually facing.
+  const forward = new THREE.Vector3(
+    Math.sin(heading),
+    verticalSpeed / Math.max(speed, 0.01),
+    -Math.cos(heading)
+  ).normalize();
 
-  velocity.x *= Math.pow(drag, dt);
-  velocity.y *= Math.pow(drag, dt);
+  glider.position.x += forward.x * speed * dt;
+  glider.position.y += verticalSpeed * dt;
+  glider.position.z += forward.z * speed * dt;
 
-  velocity.z = Math.max(-maxSpeed, Math.min(-minSpeed, velocity.z));
-
-  glider.position.x += velocity.x * dt;
-  glider.position.y += velocity.y * dt;
-  glider.position.z += velocity.z * dt;
-
+  // Soft altitude limits.
   if (glider.position.y < 0.5) {
     glider.position.y = 0.5;
-    velocity.y = Math.max(0.025, velocity.y * -0.15);
+    verticalSpeed = Math.max(0.025, verticalSpeed * -0.15);
   }
   if (glider.position.y > 20) {
     glider.position.y = 20;
-    velocity.y = Math.min(-0.01, velocity.y * 0.2);
+    verticalSpeed = Math.min(-0.01, verticalSpeed * 0.2);
   }
 
-  // Large-world boundary, far outside normal test flight.
+  // Large-world boundaries, far outside normal flight.
   if (glider.position.x < -BOUNDARY) {
     glider.position.x = -BOUNDARY;
-    velocity.x = Math.abs(velocity.x) * 0.25;
+    heading = Math.PI - heading;
+    turnRate *= 0.25;
   }
   if (glider.position.x > BOUNDARY) {
     glider.position.x = BOUNDARY;
-    velocity.x = -Math.abs(velocity.x) * 0.25;
+    heading = Math.PI - heading;
+    turnRate *= 0.25;
   }
   if (glider.position.z < -BOUNDARY) {
     glider.position.z = -BOUNDARY;
-    velocity.z = Math.min(-minSpeed, velocity.z * 0.25);
+    heading = -heading;
+    turnRate *= 0.25;
   }
   if (glider.position.z > BOUNDARY) {
     glider.position.z = BOUNDARY;
-    velocity.z = -Math.max(minSpeed, Math.abs(velocity.z) * 0.25);
+    heading = -heading;
+    turnRate *= 0.25;
   }
 
-  const targetRoll = THREE.MathUtils.clamp(-velocity.x * 2.4, -0.65, 0.65);
-  const targetPitch = THREE.MathUtils.clamp(velocity.y * 1.8, -0.45, 0.45);
-
+  // Point the glider along its flight direction and bank into the turn.
+  glider.rotation.y = heading;
+  const targetRoll = THREE.MathUtils.clamp(-turnRate * 9, -0.75, 0.75);
+  const targetPitch = THREE.MathUtils.clamp(verticalSpeed * 1.8, -0.45, 0.45);
   glider.rotation.z += (targetRoll - glider.rotation.z) * 0.10 * dt;
   glider.rotation.x += (targetPitch - glider.rotation.x) * 0.10 * dt;
 
+  // Smooth chase camera.
   const desiredCamera = new THREE.Vector3(
-    glider.position.x,
+    glider.position.x - Math.sin(heading) * 13,
     glider.position.y + 4.5,
-    glider.position.z + 13
+    glider.position.z + Math.cos(heading) * 13
   );
   camera.position.lerp(desiredCamera, 0.08 * dt);
 
   const lookTarget = new THREE.Vector3(
-    glider.position.x + velocity.x * 8,
-    glider.position.y + velocity.y * 8,
-    glider.position.z - 10
+    glider.position.x + Math.sin(heading) * 10,
+    glider.position.y + verticalSpeed * 8,
+    glider.position.z - Math.cos(heading) * 10
   );
   camera.lookAt(lookTarget);
 
