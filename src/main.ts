@@ -41,7 +41,7 @@ scene.add(sunLight);
 const buildingMaterial = new THREE.MeshLambertMaterial({ color: 0xc8c6c0 });
 const darkBuildingMaterial = new THREE.MeshLambertMaterial({ color: 0x74787b });
 
-const buildings: THREE.Mesh[] = [];
+const buildings: Array<{x:number; z:number; width:number; depth:number; height:number}> = [];
 
 // Landmark helper used by the lightweight Sydney renderer.
 function addLandmark(x: number, z: number, height: number, width: number) {
@@ -64,63 +64,72 @@ const SYDNEY_LON = 151.2093;
 const CITY_RADIUS_M = 5000;
 
 function createSydneyCity() {
-  // CBD-style high density around the centre, tapering outward.
-  const blockSize = 34;
-  const half = 2500;
+  // Keep the whole prototype GPU-light: one shared box geometry + one
+  // InstancedMesh instead of thousands of independent Three.js meshes.
+  const blockSize = 55;
+  const half = 2450;
+  const positions: Array<{x:number; z:number; width:number; depth:number; height:number}> = [];
 
   for (let x = -half; x <= half; x += blockSize) {
     for (let z = -half; z <= half; z += blockSize) {
       const distance = Math.hypot(x, z);
-      if (distance > half * 1.02) continue;
+      if (distance > half) continue;
 
-      // Leave broad corridors representing major streets/parks/water.
-      const roadX = Math.abs(((x + 17) % 170) - 85) < 11;
-      const roadZ = Math.abs(((z + 17) % 210) - 105) < 11;
+      // Large corridors make the city read as a street grid from altitude.
+      const roadX = Math.abs(((x + 27) % 275) - 137.5) < 18;
+      const roadZ = Math.abs(((z + 27) % 330) - 165) < 18;
       if (roadX || roadZ) continue;
 
-      // Sydney CBD is dense; suburbs become lower and more spread out.
-      const density = Math.max(0, 1 - distance / 2800);
+      const density = Math.max(0, 1 - distance / 2700);
       const seed = Math.abs((x * 73856093) ^ (z * 19349663));
-      const lotSkip = (seed % 100) / 100;
-      if (lotSkip > 0.72 + density * 0.20) continue;
+      const chance = (seed % 1000) / 1000;
+      if (chance > 0.40 + density * 0.35) continue;
 
-      const width = 18 + (seed % 12);
-      const depth = 18 + ((seed >> 4) % 12);
-      const baseHeight = 8 + density * 20;
-      const towerChance = (seed % 1000) / 1000;
-      const height = towerChance < density * 0.22
-        ? 45 + (seed % 120)
-        : baseHeight + (seed % 18);
+      const width = 28 + (seed % 15);
+      const depth = 28 + ((seed >> 4) % 15);
+      const tower = (seed % 1000) / 1000 < density * 0.16;
+      const height = tower ? 55 + (seed % 115) : 10 + density * 22 + (seed % 18);
 
-      const building = new THREE.Mesh(
-        new THREE.BoxGeometry(width, height, depth),
-        height > 55 ? darkBuildingMaterial : buildingMaterial
-      );
-      building.position.set(x, height / 2 - 0.5, z);
-      building.userData.width = width;
-      building.userData.depth = depth;
-      building.userData.height = height;
-      scene.add(building);
-      buildings.push(building);
+      positions.push({x, z, width, depth, height});
     }
   }
 
-  // Harbour/water proxy: broad blue strips north/east of the CBD.
-  const waterMaterial = new THREE.MeshBasicMaterial({ color: 0x4e9fc4 });
-  const harbour = new THREE.Mesh(
-    new THREE.BoxGeometry(1200, 0.15, 1800),
-    waterMaterial
-  );
-  harbour.position.set(720, -0.88, -1150);
-  scene.add(harbour);
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  const material = new THREE.MeshLambertMaterial({ color: 0xc8c6c0 });
+  const instanced = new THREE.InstancedMesh(geometry, material, positions.length);
+  const matrix = new THREE.Matrix4();
+  const scale = new THREE.Vector3();
 
-  // Major navigation landmarks, kept deliberately simple and cheap.
-  addLandmark(0, -90, 52, 11);       // CBD landmark
-  addLandmark(95, 55, 42, 13);       // eastern CBD
-  addLandmark(-105, 65, 34, 15);      // western CBD
+  positions.forEach((b, i) => {
+    scale.set(b.width, b.height, b.depth);
+    matrix.compose(
+      new THREE.Vector3(b.x, b.height / 2 - 0.5, b.z),
+      new THREE.Quaternion(),
+      scale
+    );
+    instanced.setMatrixAt(i, matrix);
+    buildings.push(b);
+  });
+
+  instanced.instanceMatrix.needsUpdate = true;
+  scene.add(instanced);
+
+  // Harbour proxy north/east of the CBD.
+  const water = new THREE.Mesh(
+    new THREE.BoxGeometry(1500, 0.15, 1900),
+    new THREE.MeshBasicMaterial({ color: 0x4e9fc4 })
+  );
+  water.position.set(800, -0.88, -1200);
+  scene.add(water);
+
+  // Three cheap vertical navigation markers.
+  addLandmark(0, -90, 52, 11);
+  addLandmark(95, 55, 42, 13);
+  addLandmark(-105, 65, 34, 15);
 
   cityLabel.textContent = 'SYDNEY • LIGHTWEIGHT CITY';
 }
+
 
 const cityLabel = document.createElement('div');
 Object.assign(cityLabel.style, {
@@ -403,11 +412,11 @@ function animate(now = performance.now()) {
   if (!crashed) {
     const p = glider.position;
     for (const building of buildings) {
-      const dx = Math.abs(p.x - building.position.x);
-      const dz = Math.abs(p.z - building.position.z);
-      const halfX = Math.max(3, (building.userData.width as number) * 0.5) + 1;
-      const halfZ = Math.max(3, (building.userData.depth as number) * 0.5) + 1;
-      const top = building.userData.height as number;
+      const dx = Math.abs(p.x - building.x);
+      const dz = Math.abs(p.z - building.z);
+      const halfX = Math.max(3, building.width * 0.5) + 1;
+      const halfZ = Math.max(3, building.depth * 0.5) + 1;
+      const top = building.height;
       if (dx < halfX && dz < halfZ && p.y < top + 0.8) {
         crash();
         break;
