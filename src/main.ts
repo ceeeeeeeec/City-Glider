@@ -135,6 +135,7 @@ function updateHud() {
     '← → STEER &nbsp; ↑ CLIMB &nbsp; ↓ DIVE' +
     '</span><br>' +
     '<span style="font-size:14px">COINS: ' + score + ' / ' + COIN_COUNT +
+    ' &nbsp; ALTITUDE: ' + Math.max(0, Math.floor(glider.position.y)) + 'm' +
     ' &nbsp; DISTANCE: ' + Math.floor(distance) + 'm</span>' +
     (crashed
       ? '<br><span style="font-size:16px">CRASHED — press SPACE to restart</span>'
