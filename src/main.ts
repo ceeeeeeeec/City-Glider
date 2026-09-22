@@ -237,7 +237,7 @@ Object.assign(minimap.style, {
 });
 document.body.appendChild(minimap);
 const mapCtx = minimap.getContext('2d')!;
-const MAP_SCALE = 0.075;
+const MAP_SCALE = 0.055;
 
 const mapStreets: Array<{name:string; points:Array<[number,number]>; major?:boolean}> = [
   {name:'George St', points:[[-120,100],[-75,20],[-35,-90],[10,-260],[70,-520]], major:true},
@@ -332,6 +332,32 @@ function drawMinimap() {
   mapCtx.fillStyle='#e83b32'; mapCtx.beginPath(); mapCtx.moveTo(0,-11); mapCtx.lineTo(7,9); mapCtx.lineTo(0,5); mapCtx.lineTo(-7,9); mapCtx.closePath(); mapCtx.fill();
   mapCtx.strokeStyle='#fff'; mapCtx.lineWidth=2; mapCtx.stroke();
   mapCtx.restore();
+
+  // Real-world navigation indicators for Sydney.
+  const landmarks: Array<{name:string;x:number;z:number}> = [
+    {name:'OPERA HOUSE',x:65,z:100},
+    {name:'HARBOUR BRIDGE',x:80,z:210},
+    {name:'DARLING HARBOUR',x:-220,z:-150},
+    {name:'CENTRAL',x:70,z:-360},
+    {name:'ANZAC BRIDGE',x:-470,z:170},
+    {name:'NORTH SYDNEY',x:280,z:560},
+    {name:'BONDI',x:1500,z:-700},
+    {name:'SYDNEY AIRPORT',x:850,z:-1550},
+    {name:'MANLY',x:1450,z:1250},
+    {name:'TARONGA ZOO',x:1050,z:650}
+  ];
+  mapCtx.font='bold 9px system-ui';
+  landmarks.forEach(l => {
+    const px=l.x*MAP_SCALE, py=l.z*MAP_SCALE;
+    mapCtx.fillStyle='#ffcf33'; mapCtx.beginPath(); mapCtx.arc(px,py,3,0,Math.PI*2); mapCtx.fill();
+    mapCtx.fillStyle='#fff'; mapCtx.textAlign='left'; mapCtx.fillText(l.name,px+5,py+3);
+  });
+
+  // Main harbour channels and coastline reference lines.
+  mapCtx.strokeStyle='rgba(255,255,255,.75)'; mapCtx.lineWidth=1;
+  [[-800,0,900,0],[-400,-500,850,-1550],[250,150,1450,1250]].forEach(([x1,z1,x2,z2])=>{
+    mapCtx.beginPath(); mapCtx.moveTo(x1*MAP_SCALE,z1*MAP_SCALE); mapCtx.lineTo(x2*MAP_SCALE,z2*MAP_SCALE); mapCtx.stroke();
+  });
 
   // Compass ring / cardinal directions.
   mapCtx.fillStyle='#fff'; mapCtx.font='bold 12px system-ui'; mapCtx.textAlign='center';
@@ -470,19 +496,19 @@ addEventListener('keyup', (event) => {
 let heading = 0;
 let pitch = 0;
 
-const velocity = new THREE.Vector3(0, -5, -55);
+const velocity = new THREE.Vector3(0, -8, -78);
 const desiredForward = new THREE.Vector3();
 const velocityDirection = new THREE.Vector3();
 
 const minSpeed = 8;
-const maxSpeed = 95;
+const maxSpeed = 150;
 const gravity = 24;
-const diveAcceleration = 20;
+const diveAcceleration = 34;
 const drag = 0.0025;
-const steeringRate = 1.65;
+const steeringRate = 1.9;
 const pitchUpRate = 1.35;
 const pitchDownRate = 2.15;
-const velocityAlignment = 2.8;
+const velocityAlignment = 3.6;
 const startPosition = new THREE.Vector3(0, 500, 155);
 
 // Initial minimap render after flight state (including heading) has been initialized.
